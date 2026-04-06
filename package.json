@@ -1,0 +1,11 @@
+{
+  "name": "finhay-ai-review",
+  "version": "1.0.0",
+  "description": "AI-powered PR review action using Minimax M2.7",
+  "main": "src/index.mjs",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT"
+}

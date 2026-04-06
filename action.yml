@@ -1,0 +1,42 @@
+name: 'Finhay AI Review'
+description: 'AI-powered PR review using Minimax M2.7 (OpenAI-compatible)'
+author: 'Finhay Tech'
+
+inputs:
+  model:
+    description: 'LLM model name'
+    default: 'MiniMax-M2.7'
+  api_base:
+    description: 'OpenAI-compatible API base URL'
+    default: 'https://api.minimaxi.chat/v1'
+  api_key:
+    description: 'API key for the LLM provider'
+    required: true
+  trigger_word:
+    description: 'Trigger word for interactive mode'
+    default: '@kai-review'
+  auto_review:
+    description: 'Enable auto review on PR open/push'
+    default: 'true'
+  max_diff_lines:
+    description: 'Max diff lines to review (skip if larger)'
+    default: '10000'
+  language:
+    description: 'Review language (vi or en)'
+    default: 'vi'
+  review_level:
+    description: 'Review strictness: relaxed, standard, strict'
+    default: 'standard'
+  include_nitpicks:
+    description: 'Include nitpick-level comments'
+    default: 'false'
+  conventions_file:
+    description: 'Path to conventions file'
+    default: '.github/review-conventions.md'
+  github_token:
+    description: 'GitHub token for API calls'
+    default: ''
+
+runs:
+  using: 'node20'
+  main: 'src/index.mjs'
