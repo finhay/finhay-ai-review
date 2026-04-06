@@ -73,9 +73,14 @@ async function handlePullRequest(event, owner, repo, config) {
   console.log(`PR #${prNumber}: ${pr.title} (${event.action})`);
 
   // Check if paused
-  const botReviews = await gh.getBotReviews(owner, repo, prNumber, botLogin);
-  // Also check issue comments for pause state
-  // (simplified: check review bodies for pause marker)
+  const [botReviews, botComments] = await Promise.all([
+    gh.getBotReviews(owner, repo, prNumber, botLogin),
+    gh.getBotComments(owner, repo, prNumber, botLogin),
+  ]);
+  if (isPaused(botComments)) {
+    console.log(`PR #${prNumber} is paused, skipping auto review`);
+    return;
+  }
 
   // Determine if incremental or full review
   let isIncremental = false;
@@ -113,10 +118,12 @@ async function handlePullRequest(event, owner, repo, config) {
   }
 
   // Load conventions + learnings
-  const conventions = await loadConventions(owner, repo, pr.head.ref, config);
-  const prFiles = await gh.getPRFiles(owner, repo, prNumber);
+  const [conventions, prFiles, allLearnings] = await Promise.all([
+    loadConventions(owner, repo, pr.head.ref, config),
+    gh.getPRFiles(owner, repo, prNumber),
+    loadLearnings(gh, owner, repo, pr.head.ref),
+  ]);
   const filenames = prFiles.map(f => f.filename);
-  const allLearnings = await loadLearnings(gh, owner, repo, pr.head.ref);
   const relevantLearnings = filterLearnings(allLearnings, filenames);
 
   // Build prompts
@@ -135,19 +142,29 @@ async function handlePullRequest(event, owner, repo, config) {
   if (estimateTokens(diff) > 30000) {
     // Review per file, merge results
     console.log(`Large diff (${fileChunks.length} files), reviewing per file`);
-    const results = [];
-    for (const chunk of fileChunks) {
-      const userMsg = reviewPrompt({
-        prTitle: pr.title,
-        prDescription: pr.body || '',
-        diff: truncate(chunk.patch, 15000),
-        isIncremental,
+    const CONCURRENCY = 5;
+    const results = new Array(fileChunks.length);
+    for (let i = 0; i < fileChunks.length; i += CONCURRENCY) {
+      const batch = fileChunks.slice(i, i + CONCURRENCY);
+      const promises = batch.map(async (chunk, j) => {
+        const userMsg = reviewPrompt({
+          prTitle: pr.title,
+          prDescription: pr.body || '',
+          diff: truncate(chunk.patch, 15000),
+          isIncremental,
+        });
+        try {
+          const res = await chat(
+            [{ role: 'system', content: sysPrompt }, { role: 'user', content: userMsg }],
+            { apiBase: config.apiBase, apiKey: config.apiKey, model: config.model }
+          );
+          results[i + j] = `#### ${chunk.filename}\n${res.content}`;
+        } catch (err) {
+          console.error(`Failed to review ${chunk.filename}: ${err.message}`);
+          results[i + j] = `#### ${chunk.filename}\n⚠️ Review failed for this file.`;
+        }
       });
-      const res = await chat(
-        [{ role: 'system', content: sysPrompt }, { role: 'user', content: userMsg }],
-        { apiBase: config.apiBase, apiKey: config.apiKey, model: config.model }
-      );
-      results.push(`#### ${chunk.filename}\n${res.content}`);
+      await Promise.all(promises);
     }
     reviewContent = results.join('\n\n---\n\n');
   } else {
@@ -333,7 +350,6 @@ async function detectLearning(event, owner, repo, config) {
 
 // ===== Helpers =====
 async function loadConventions(owner, repo, ref, config) {
-  // Try configured file first
   const paths = [
     config.conventionsFile,
     'CLAUDE.md',
@@ -342,10 +358,14 @@ async function loadConventions(owner, repo, ref, config) {
     '.github/copilot-instructions.md',
   ];
 
-  for (const p of paths) {
-    const content = await gh.getFileContent(owner, repo, p, ref);
+  // Fetch all in parallel, use first match (by priority order)
+  const results = await Promise.all(
+    paths.map(p => gh.getFileContent(owner, repo, p, ref).then(content => ({ path: p, content })))
+  );
+
+  for (const { path, content } of results) {
     if (content) {
-      console.log(`Loaded conventions from: ${p}`);
+      console.log(`Loaded conventions from: ${path}`);
       return truncate(content, 5000);
     }
   }
