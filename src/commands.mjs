@@ -22,6 +22,7 @@ export function parseCommand(body, triggerWord = '@kai-review') {
   if (afterLower === 'resume') return { type: 'resume' };
   if (afterLower === 'help') return { type: 'help' };
   if (afterLower === 'resolve') return { type: 'resolve' };
+  if (afterLower === 'fix') return { type: 'fix' };
   if (afterLower.startsWith('full review')) return { type: 'full_review' };
   if (afterLower === 'review') return { type: 'review' };
   if (afterLower === 'summary') return { type: 'summary' };

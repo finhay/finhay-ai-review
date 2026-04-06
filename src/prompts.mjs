@@ -182,6 +182,26 @@ export function formatReviewBody(content, sha, model) {
   return `<!-- kai-review-meta: ${meta} -->\n\n## 🔍 AI Code Review\n\n${content}`;
 }
 
+export function fixPrompt({ finding, fileContent, filename }) {
+  let prompt = `A code review found this issue:
+
+${finding}`;
+
+  if (fileContent) {
+    prompt += `\n\nHere is the full file \`${filename}\`:\n\`\`\`\n${fileContent}\n\`\`\``;
+  }
+
+  prompt += `\n\nGenerate a fix for this issue. Output ONLY GitHub suggestion block(s) with the corrected code:
+\`\`\`suggestion
+<corrected code here>
+\`\`\`
+
+If the fix requires changes in multiple places, provide each suggestion separately with a brief note.
+Keep the fix minimal — only change what's necessary to resolve the issue.`;
+
+  return prompt;
+}
+
 export function helpText(triggerWord) {
   return `## 🤖 Kai Review — Commands
 
@@ -191,6 +211,7 @@ export function helpText(triggerWord) {
 | \`${triggerWord} review\` | Trigger incremental review |
 | \`${triggerWord} full review\` | Review lại từ đầu |
 | \`${triggerWord} summary\` | Tạo lại tóm tắt PR |
+| \`${triggerWord} fix\` | Tạo fix suggestion (reply vào review comment) |
 | \`${triggerWord} pause\` | Tạm dừng auto review cho PR này |
 | \`${triggerWord} resume\` | Bật lại auto review |
 | \`${triggerWord} resolve\` | Resolve tất cả comments cũ |
@@ -198,5 +219,6 @@ export function helpText(triggerWord) {
 
 **Tips:**
 - Reply trực tiếp vào review comment để hỏi chi tiết
+- Reply \`${triggerWord} fix\` vào finding để bot tạo suggestion fix
 - Nếu review sai, reply sửa → bot sẽ hỏi có muốn lưu làm learning không`;
 }

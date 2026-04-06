@@ -5,11 +5,11 @@ import * as gh from './github.mjs';
 import { chat, chunkDiffByFile, estimateTokens } from './llm.mjs';
 import {
   systemPrompt, reviewPrompt, interactivePrompt, summaryPrompt,
-  learningDetectionPrompt, formatReviewBody, helpText,
+  learningDetectionPrompt, formatReviewBody, helpText, fixPrompt,
 } from './prompts.mjs';
 import { loadLearnings, filterLearnings, learningConfirmationMessage } from './learnings.mjs';
 import { parseCommand, isPaused } from './commands.mjs';
-import { getInput, parseRepo, readEventPayload, countDiffLines, truncate } from './utils.mjs';
+import { getInput, parseRepo, readEventPayload, countDiffLines, truncate, sanitize, parseDiffMap, parseFindings } from './utils.mjs';
 
 async function main() {
   // --- Load config ---
@@ -147,8 +147,8 @@ async function handlePullRequest(event, owner, repo, config) {
       const batch = fileChunks.slice(i, i + CONCURRENCY);
       const promises = batch.map(async (chunk, j) => {
         const userMsg = reviewPrompt({
-          prTitle: pr.title,
-          prDescription: pr.body || '',
+          prTitle: sanitize(pr.title),
+          prDescription: sanitize(pr.body || ''),
           diff: truncate(chunk.patch, 15000),
           isIncremental,
           fileManifest,
@@ -170,8 +170,8 @@ async function handlePullRequest(event, owner, repo, config) {
   } else {
     // Single review
     const userMsg = reviewPrompt({
-      prTitle: pr.title,
-      prDescription: pr.body || '',
+      prTitle: sanitize(pr.title),
+      prDescription: sanitize(pr.body || ''),
       diff: truncate(diff, 60000),
       isIncremental,
       fileManifest,
@@ -184,10 +184,27 @@ async function handlePullRequest(event, owner, repo, config) {
     console.log(`Tokens: ${JSON.stringify(res.usage)}`);
   }
 
-  // Post review
-  const body = formatReviewBody(reviewContent, headSha, config.model);
-  await gh.postReview(owner, repo, prNumber, body, 'COMMENT');
-  console.log(`✅ Review posted for PR #${prNumber}`);
+  // Parse findings for inline comments
+  const { inlineComments, reviewBody } = buildInlineComments(reviewContent, diff);
+  let body = formatReviewBody(reviewBody, headSha, config.model);
+
+  // Try with inline comments, fall back to body-only if GitHub rejects them
+  let posted = inlineComments.length > 0
+    ? await gh.postReview(owner, repo, prNumber, body, 'COMMENT', inlineComments)
+    : false;
+
+  if (!posted && inlineComments.length > 0) {
+    console.log('Inline comments rejected by GitHub, retrying without inline comments');
+    body = formatReviewBody(reviewContent, headSha, config.model);
+  }
+
+  if (!posted) {
+    posted = await gh.postReview(owner, repo, prNumber, body, 'COMMENT');
+  }
+
+  console.log(posted
+    ? `✅ Review posted for PR #${prNumber} (${inlineComments.length} inline comments)`
+    : `❌ Failed to post review for PR #${prNumber}`);
 }
 
 // ===== Issue/PR comment with @trigger =====
@@ -243,7 +260,7 @@ async function handleIssueComment(event, owner, repo, config) {
         gh.getPRFiles(owner, repo, prNumber),
         gh.getPRDiff(owner, repo, prNumber),
       ]);
-      const userMsg = summaryPrompt({ prTitle: pr.title, prDescription: pr.body, files, diff: truncate(summaryDiff, 15000) });
+      const userMsg = summaryPrompt({ prTitle: sanitize(pr.title), prDescription: sanitize(pr.body), files, diff: truncate(summaryDiff, 15000) });
       const res = await chat(
         [{ role: 'system', content: 'You are a helpful PR summarizer. Write in Vietnamese.' }, { role: 'user', content: userMsg }],
         { apiBase: config.apiBase, apiKey: config.apiKey, model: config.model, temperature: 0.3 }
@@ -259,8 +276,8 @@ async function handleIssueComment(event, owner, repo, config) {
       ]);
       const userMsg = interactivePrompt({
         question: cmd.args,
-        prTitle: pr.title,
-        prDescription: pr.body,
+        prTitle: sanitize(pr.title),
+        prDescription: sanitize(pr.body),
         diff: truncate(diff, 15000),
       });
       const sysPrompt = systemPrompt({
@@ -294,12 +311,39 @@ async function handleReviewComment(event, owner, repo, config) {
 
   const prNumber = event.pull_request.number;
 
-  if (cmd.type === 'chat') {
+  if (cmd.type === 'fix') {
+    const pr = event.pull_request;
+    // Get the bot's original finding (parent comment in the thread)
+    const parentComment = comment.in_reply_to_id
+      ? await gh.getReviewComment(owner, repo, comment.in_reply_to_id)
+      : null;
+    const finding = parentComment?.body || comment.diff_hunk || '';
+    const filename = comment.path || parentComment?.path || '';
+
+    let fileContent = '';
+    if (filename) {
+      fileContent = await gh.getFileContent(owner, repo, filename, pr.head.ref) || '';
+    }
+
+    const userMsg = fixPrompt({
+      finding,
+      fileContent: truncate(fileContent, 10000),
+      filename,
+    });
+    const res = await chat(
+      [
+        { role: 'system', content: `You are a precise code fixer. Generate minimal fixes using GitHub suggestion blocks. Answer in ${config.language === 'vi' ? 'Vietnamese' : 'English'}.` },
+        { role: 'user', content: userMsg },
+      ],
+      { apiBase: config.apiBase, apiKey: config.apiKey, model: config.model, temperature: 0.2 }
+    );
+    await gh.replyToReviewComment(owner, repo, prNumber, comment.id, res.content);
+  } else if (cmd.type === 'chat') {
     const pr = event.pull_request;
     const userMsg = interactivePrompt({
       question: cmd.args,
-      prTitle: pr.title,
-      prDescription: pr.body,
+      prTitle: sanitize(pr.title),
+      prDescription: sanitize(pr.body),
       fileContext: comment.diff_hunk || '',
     });
     const res = await chat(
@@ -357,6 +401,46 @@ async function detectLearning(event, owner, repo, config) {
 }
 
 // ===== Helpers =====
+
+function buildInlineComments(reviewContent, diff) {
+  const parsed = parseFindings(reviewContent);
+  if (parsed.findings.length === 0) {
+    return { inlineComments: [], reviewBody: reviewContent };
+  }
+
+  const diffMap = parseDiffMap(diff);
+  const inlineComments = [];
+  const bodyFindings = [];
+
+  for (const finding of parsed.findings) {
+    if (finding.file && finding.line && diffMap.get(finding.file)?.has(finding.line)) {
+      const commentBody = finding.title
+        ? `${finding.severity} **${finding.severityLabel} — ${finding.title}**\n\n${finding.body}`
+        : finding.raw;
+      inlineComments.push({
+        path: finding.file,
+        line: finding.line,
+        side: 'RIGHT',
+        body: commentBody,
+      });
+    } else {
+      bodyFindings.push(finding.raw);
+    }
+  }
+
+  const parts = [];
+  if (parsed.summary) parts.push(`### Tóm tắt\n${parsed.summary}`);
+  if (bodyFindings.length > 0) {
+    parts.push(`### Findings\n${bodyFindings.join('\n\n')}`);
+  } else if (inlineComments.length > 0) {
+    parts.push(`### Findings\n_${inlineComments.length} finding(s) posted as inline comments below._`);
+  }
+  if (parsed.positives) parts.push(`### ✅ Điểm tốt\n${parsed.positives}`);
+
+  const reviewBody = parts.length > 0 ? parts.join('\n\n') : reviewContent;
+  return { inlineComments, reviewBody };
+}
+
 async function loadConventions(owner, repo, ref, config) {
   const paths = [
     config.conventionsFile,

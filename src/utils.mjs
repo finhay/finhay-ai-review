@@ -55,3 +55,112 @@ export async function readEventPayload() {
   const data = await readFile(path, 'utf8');
   return JSON.parse(data);
 }
+
+/**
+ * Sanitize text to prevent prompt injection.
+ */
+export function sanitize(text) {
+  if (!text) return '';
+  return text
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/[\u200B-\u200F\u2028-\u202F\uFEFF]/g, '')
+    .replace(/\[([^\]]*)\]\(javascript:(?:[^)(]*|\([^)]*\))*\)/g, '$1')
+    .replace(/<[^>]*style\s*=\s*["'][^"']*display\s*:\s*none[^"']*["'][^>]*>[\s\S]*?<\/[^>]*>/gi, '');
+}
+
+/**
+ * Parse unified diff to extract valid (file, line) pairs for inline comments.
+ * Returns Map<filepath, Set<lineNumber>> for lines visible in the diff (RIGHT side).
+ */
+export function parseDiffMap(diffText) {
+  const map = new Map();
+  let currentFile = null;
+  let newLine = 0;
+
+  for (const line of diffText.split('\n')) {
+    const fileMatch = line.match(/^diff --git a\/.+ b\/(.+)$/);
+    if (fileMatch) {
+      currentFile = fileMatch[1];
+      if (!map.has(currentFile)) map.set(currentFile, new Set());
+      continue;
+    }
+
+    const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunkMatch) {
+      newLine = parseInt(hunkMatch[1]);
+      continue;
+    }
+
+    if (!currentFile) continue;
+
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      map.get(currentFile).add(newLine);
+      newLine++;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      // deleted line — don't increment new line counter
+    } else if (!line.startsWith('\\')) {
+      // context line — valid for inline comments
+      map.get(currentFile).add(newLine);
+      newLine++;
+    }
+  }
+
+  return map;
+}
+
+/**
+ * Parse review markdown into structured findings for inline comments.
+ * Returns { summary, findings: [{ severity, severityLabel, title, file, line, body, raw }], positives }
+ */
+export function parseFindings(reviewContent) {
+  const result = { summary: '', findings: [], positives: '' };
+
+  const summaryMatch = reviewContent.match(/###\s*Tóm tắt\n([\s\S]*?)(?=###|$)/);
+  if (summaryMatch) result.summary = summaryMatch[1].trim();
+
+  const positivesMatch = reviewContent.match(/###\s*✅\s*Điểm tốt\n([\s\S]*?)(?=###|$)/);
+  if (positivesMatch) result.positives = positivesMatch[1].trim();
+
+  const findingsMatch = reviewContent.match(/###\s*Findings\n([\s\S]*?)(?=###\s*✅|$)/);
+  if (!findingsMatch) return result;
+
+  const findingBlocks = findingsMatch[1].split(/(?=^(?:🔴|🟠|🟡|🔵))/m);
+
+  for (const block of findingBlocks) {
+    const trimmed = block.trim();
+    if (!trimmed) continue;
+
+    // Parse: 🟠 **Major — Missing null check** — `src/order/service.ts:42`
+    const headerMatch = trimmed.match(
+      /^(🔴|🟠|🟡|🔵)\s+\*\*(\w+)\s*—\s*(.+?)\*\*\s*—?\s*`([^`]+?):(\d+)`/
+    );
+
+    if (headerMatch) {
+      const [, emoji, severity, title, file, lineStr] = headerMatch;
+      const headerEnd = trimmed.indexOf('\n');
+      const body = headerEnd >= 0 ? trimmed.slice(headerEnd + 1).trim() : '';
+
+      result.findings.push({
+        severity: emoji,
+        severityLabel: severity,
+        title: title.trim(),
+        file,
+        line: parseInt(lineStr),
+        body,
+        raw: trimmed,
+      });
+    } else {
+      result.findings.push({
+        severity: trimmed.match(/^(🔴|🟠|🟡|🔵)/)?.[1] || '🟡',
+        severityLabel: '',
+        title: '',
+        file: null,
+        line: null,
+        body: trimmed,
+        raw: trimmed,
+      });
+    }
+  }
+
+  return result;
+}
