@@ -125,6 +125,7 @@ async function handlePullRequest(event, owner, repo, config) {
   ]);
   const filenames = prFiles.map(f => f.filename);
   const relevantLearnings = filterLearnings(allLearnings, filenames);
+  const fileManifest = buildFileManifest(prFiles);
 
   // Build prompts
   const sysPrompt = systemPrompt({
@@ -152,6 +153,7 @@ async function handlePullRequest(event, owner, repo, config) {
           prDescription: pr.body || '',
           diff: truncate(chunk.patch, 15000),
           isIncremental,
+          fileManifest,
         });
         try {
           const res = await chat(
@@ -174,6 +176,7 @@ async function handlePullRequest(event, owner, repo, config) {
       prDescription: pr.body || '',
       diff: truncate(diff, 60000),
       isIncremental,
+      fileManifest,
     });
     const res = await chat(
       [{ role: 'system', content: sysPrompt }, { role: 'user', content: userMsg }],
@@ -237,9 +240,12 @@ async function handleIssueComment(event, owner, repo, config) {
     }
 
     case 'summary': {
-      const pr = await gh.getPR(owner, repo, prNumber);
-      const files = await gh.getPRFiles(owner, repo, prNumber);
-      const userMsg = summaryPrompt({ prTitle: pr.title, prDescription: pr.body, files });
+      const [pr, files, summaryDiff] = await Promise.all([
+        gh.getPR(owner, repo, prNumber),
+        gh.getPRFiles(owner, repo, prNumber),
+        gh.getPRDiff(owner, repo, prNumber),
+      ]);
+      const userMsg = summaryPrompt({ prTitle: pr.title, prDescription: pr.body, files, diff: truncate(summaryDiff, 15000) });
       const res = await chat(
         [{ role: 'system', content: 'You are a helpful PR summarizer. Write in Vietnamese.' }, { role: 'user', content: userMsg }],
         { apiBase: config.apiBase, apiKey: config.apiKey, model: config.model, temperature: 0.3 }
@@ -312,17 +318,19 @@ async function detectLearning(event, owner, repo, config) {
   const comment = event.comment;
   const prNumber = event.pull_request.number;
 
-  // Check if reply is to a bot comment by checking in_reply_to
   if (!comment.in_reply_to_id) return;
 
-  // Get the parent comment to check if it's from the bot
-  // (simplified: use heuristic — if the reply contains correction language)
   const userReply = comment.body;
   if (!userReply || userReply.length < 20) return;
 
+  // Fetch the parent comment to get the actual bot review text
+  const parentComment = await gh.getReviewComment(owner, repo, comment.in_reply_to_id);
+  if (!parentComment || parentComment.user?.login !== getBotLoginSync()) return;
+
   const prompt = learningDetectionPrompt({
-    botComment: comment.diff_hunk || '(review context)',
+    botComment: parentComment.body,
     userReply,
+    codeContext: comment.diff_hunk || '',
   });
 
   try {
@@ -370,6 +378,22 @@ async function loadConventions(owner, repo, ref, config) {
     }
   }
   return '';
+}
+
+function buildFileManifest(prFiles) {
+  const EXT_LANG = {
+    '.ts': 'TypeScript', '.tsx': 'TypeScript/React', '.js': 'JavaScript', '.jsx': 'JavaScript/React',
+    '.py': 'Python', '.go': 'Go', '.java': 'Java', '.kt': 'Kotlin', '.swift': 'Swift',
+    '.rb': 'Ruby', '.rs': 'Rust', '.css': 'CSS', '.scss': 'SCSS', '.html': 'HTML',
+    '.sql': 'SQL', '.sh': 'Shell', '.yaml': 'YAML', '.yml': 'YAML', '.json': 'JSON',
+  };
+  const lines = prFiles.map(f => {
+    const ext = f.filename.match(/\.[^.]+$/)?.[0] || '';
+    const lang = EXT_LANG[ext] || '';
+    const status = f.status === 'added' ? 'new' : f.status === 'removed' ? 'deleted' : 'modified';
+    return `- ${f.filename} (${status}, +${f.additions}/-${f.deletions})${lang ? ` — ${lang}` : ''}`;
+  });
+  return lines.join('\n');
 }
 
 function getBotLoginSync() {

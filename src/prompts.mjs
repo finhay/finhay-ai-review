@@ -18,12 +18,27 @@ Your reviews are in ${lang}.
 - Focus on what matters: bugs > security > performance > readability
 - Give positive feedback for good patterns (brief)
 - Never nitpick formatting if there's a linter/formatter configured${includeNitpicks ? '\n- Include nitpick-level style suggestions' : '\n- Skip nitpick-level style/formatting issues'}
+- If you are not certain about a finding, say so — prefix with "Possible issue:" or "Worth checking:"
+
+## Do NOT
+- Flag issues that a linter, formatter, or type checker would already catch
+- Suggest adding error handling where the framework or caller already guarantees safety
+- Hallucinate line numbers — if you cannot determine the exact line, quote the code instead
+- Suggest changes that would break existing tests or APIs without mentioning the impact
+- Repeat the same finding for multiple occurrences — mention it once and note "same pattern in X other places"
+- Add generic advice ("consider adding tests", "add logging") unless there is a specific risk
 
 ## Severity Levels
 - 🔴 Critical: Bugs that cause crashes, data loss, security vulnerabilities, race conditions
 - 🟠 Major: Performance issues, logic errors, missing error handling, bad patterns
 - 🟡 Minor: Code quality, maintainability, naming improvements
 ${includeNitpicks ? '- 🔵 Nitpick: Style, formatting, minor preferences' : ''}
+
+## GitHub Suggestion Block Syntax
+When suggesting a code fix, use this exact format:
+\`\`\`suggestion
+const result = await fetchData();
+\`\`\`
 
 ## Output Format
 Use this exact structure:
@@ -33,12 +48,20 @@ Use this exact structure:
 
 ### Findings
 [List findings grouped by severity, each with file:line reference]
-[Use GitHub suggestion blocks for code fixes when applicable]
 
 ### ✅ Điểm tốt
 [Brief positive feedback, 1-3 bullet points]
 
-If no issues found, say so clearly and still provide the summary and positive feedback.`;
+If no issues found, say so clearly and still provide the summary and positive feedback.
+
+## Example Finding
+🟠 **Major — Missing null check** — \`src/order/service.ts:42\`
+
+\`getOrder()\` can return \`null\` when the order is cancelled, but the caller dereferences without checking:
+\`\`\`suggestion
+const order = await getOrder(id);
+if (!order) throw new OrderNotFoundError(id);
+\`\`\``;
 
   if (conventions) {
     prompt += `\n\n## Team Conventions\n${conventions}`;
@@ -54,22 +77,29 @@ If no issues found, say so clearly and still provide the summary and positive fe
   return prompt;
 }
 
-export function reviewPrompt({ prTitle, prDescription, diff, isIncremental }) {
+export function reviewPrompt({ prTitle, prDescription, diff, isIncremental, fileManifest }) {
   const mode = isIncremental
     ? 'This is an INCREMENTAL review — only review the NEW changes below. Do not repeat findings from previous reviews.'
     : 'This is a FULL review of the entire PR.';
 
-  return `## PR: ${prTitle}
+  let prompt = `## PR: ${prTitle}
 
 ${prDescription ? `### Description\n${prDescription}\n` : ''}
-${mode}
+${mode}`;
 
+  if (fileManifest) {
+    prompt += `\n\n### Changed Files\n${fileManifest}\n`;
+  }
+
+  prompt += `
 ### Code Changes
 \`\`\`diff
 ${diff}
 \`\`\`
 
 Review the changes above and provide your analysis.`;
+
+  return prompt;
 }
 
 export function interactivePrompt({ question, prTitle, prDescription, diff, fileContext }) {
@@ -86,12 +116,18 @@ ${prDescription ? `Description: ${prDescription}\n` : ''}`;
   return prompt;
 }
 
-export function summaryPrompt({ prTitle, prDescription, files }) {
+export function summaryPrompt({ prTitle, prDescription, files, diff }) {
   const fileList = files.map(f => `- ${f.filename} (+${f.additions}/-${f.deletions})`).join('\n');
-  return `## PR: ${prTitle}
+  let prompt = `## PR: ${prTitle}
 ${prDescription ? `Description: ${prDescription}\n` : ''}
 ### Changed Files
-${fileList}
+${fileList}`;
+
+  if (diff) {
+    prompt += `\n\n### Code Changes (truncated)\n\`\`\`diff\n${diff}\n\`\`\``;
+  }
+
+  prompt += `
 
 Write a concise PR summary (3-5 sentences) in Vietnamese. Cover:
 1. What changed and why
@@ -99,13 +135,20 @@ Write a concise PR summary (3-5 sentences) in Vietnamese. Cover:
 3. Any risks or things to watch out for
 
 Output only the summary text, no headers.`;
+  return prompt;
 }
 
-export function learningDetectionPrompt({ botComment, userReply }) {
-  return `A reviewer corrected an AI code review comment.
+export function learningDetectionPrompt({ botComment, userReply, codeContext }) {
+  let prompt = `A reviewer corrected an AI code review comment.
 
-AI said: "${botComment}"
-Reviewer replied: "${userReply}"
+AI review comment: "${botComment}"
+Reviewer replied: "${userReply}"`;
+
+  if (codeContext) {
+    prompt += `\n\nCode context:\n\`\`\`\n${codeContext}\n\`\`\``;
+  }
+
+  prompt += `
 
 Is the reviewer teaching a general team preference that should apply to future reviews?
 If yes, extract the learning as a single concise rule statement.
@@ -117,19 +160,15 @@ CONTEXT: [file glob pattern if applicable, or "all"]
 
 Or:
 NO_LEARNING`;
+
+  return prompt;
 }
 
-/**
- * Format the review body with metadata for incremental tracking
- */
 export function formatReviewBody(content, sha, model) {
   const meta = JSON.stringify({ sha, model, ts: new Date().toISOString() });
   return `<!-- kai-review-meta: ${meta} -->\n\n## 🔍 AI Code Review\n\n${content}`;
 }
 
-/**
- * Help text for @kai-review commands
- */
 export function helpText(triggerWord) {
   return `## 🤖 Kai Review — Commands
 
