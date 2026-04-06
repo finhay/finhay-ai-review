@@ -10,8 +10,6 @@ import {
 import { loadLearnings, filterLearnings, learningConfirmationMessage } from './learnings.mjs';
 import { parseCommand, isPaused } from './commands.mjs';
 import { getInput, parseRepo, readEventPayload, countDiffLines, truncate } from './utils.mjs';
-import { readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 
 async function main() {
   // --- Load config ---
@@ -68,7 +66,7 @@ async function handlePullRequest(event, owner, repo, config) {
   const pr = event.pull_request;
   const prNumber = pr.number;
   const headSha = pr.head.sha;
-  const botLogin = await getBotLogin(config);
+  const botLogin = getBotLogin();
 
   console.log(`PR #${prNumber}: ${pr.title} (${event.action})`);
 
@@ -198,7 +196,7 @@ async function handleIssueComment(event, owner, repo, config) {
   const issue = event.issue;
 
   // Skip bot's own comments
-  if (comment.user.login === getBotLoginSync()) return;
+  if (comment.user.login === getBotLogin()) return;
 
   // Only handle PR comments (issues have no pull_request key)
   if (!issue.pull_request) return;
@@ -255,8 +253,10 @@ async function handleIssueComment(event, owner, repo, config) {
     }
 
     case 'chat': {
-      const pr = await gh.getPR(owner, repo, prNumber);
-      const diff = await gh.getPRDiff(owner, repo, prNumber);
+      const [pr, diff] = await Promise.all([
+        gh.getPR(owner, repo, prNumber),
+        gh.getPRDiff(owner, repo, prNumber),
+      ]);
       const userMsg = interactivePrompt({
         question: cmd.args,
         prTitle: pr.title,
@@ -283,7 +283,7 @@ async function handleIssueComment(event, owner, repo, config) {
 // ===== Review comment reply (inline code comment) =====
 async function handleReviewComment(event, owner, repo, config) {
   const comment = event.comment;
-  if (comment.user.login === getBotLoginSync()) return;
+  if (comment.user.login === getBotLogin()) return;
 
   const cmd = parseCommand(comment.body, config.triggerWord);
   if (!cmd) {
@@ -325,7 +325,7 @@ async function detectLearning(event, owner, repo, config) {
 
   // Fetch the parent comment to get the actual bot review text
   const parentComment = await gh.getReviewComment(owner, repo, comment.in_reply_to_id);
-  if (!parentComment || parentComment.user?.login !== getBotLoginSync()) return;
+  if (!parentComment || parentComment.user?.login !== getBotLogin()) return;
 
   const prompt = learningDetectionPrompt({
     botComment: parentComment.body,
@@ -396,12 +396,7 @@ function buildFileManifest(prFiles) {
   return lines.join('\n');
 }
 
-function getBotLoginSync() {
-  // GitHub Actions bot login — when using GITHUB_TOKEN
-  return 'github-actions[bot]';
-}
-
-async function getBotLogin(config) {
+function getBotLogin() {
   return 'github-actions[bot]';
 }
 
