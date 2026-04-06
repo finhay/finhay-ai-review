@@ -139,11 +139,13 @@ export async function getBotComments(owner, repo, issueNumber, botLogin) {
   return fetchBotItems(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, botLogin);
 }
 
-/**
- * Get a single comment by ID
- */
 export async function getComment(owner, repo, commentId) {
   const res = await ghFetch(`/repos/${owner}/${repo}/issues/comments/${commentId}`);
+  return res.ok ? res.json() : null;
+}
+
+export async function getReviewComment(owner, repo, commentId) {
+  const res = await ghFetch(`/repos/${owner}/${repo}/pulls/comments/${commentId}`);
   return res.ok ? res.json() : null;
 }
 
