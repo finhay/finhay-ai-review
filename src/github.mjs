@@ -124,14 +124,19 @@ export async function replyToReviewComment(owner, repo, prNumber, commentId, bod
   return res.ok;
 }
 
-/**
- * Get existing review comments from the bot
- */
-export async function getBotReviews(owner, repo, prNumber, botLogin) {
-  const res = await ghFetch(`/repos/${owner}/${repo}/pulls/${prNumber}/reviews?per_page=100`);
+async function fetchBotItems(apiPath, botLogin) {
+  const res = await ghFetch(`${apiPath}?per_page=100`);
   if (!res.ok) return [];
-  const reviews = await res.json();
-  return reviews.filter(r => r.user?.login === botLogin);
+  const items = await res.json();
+  return items.filter(item => item.user?.login === botLogin);
+}
+
+export async function getBotReviews(owner, repo, prNumber, botLogin) {
+  return fetchBotItems(`/repos/${owner}/${repo}/pulls/${prNumber}/reviews`, botLogin);
+}
+
+export async function getBotComments(owner, repo, issueNumber, botLogin) {
+  return fetchBotItems(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, botLogin);
 }
 
 /**
