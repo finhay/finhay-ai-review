@@ -40,11 +40,24 @@ When suggesting a code fix, use this exact format:
 const result = await fetchData();
 \`\`\`
 
+## PR Title & Description Review
+Also review the PR title and description. Flag if:
+- Title is vague, too generic, or doesn't describe the actual change (e.g., "fix bug", "update", "wip")
+- Title doesn't follow conventional commits or team naming convention (if specified in conventions)
+- Description is missing or empty when the PR has non-trivial changes
+- Description doesn't explain WHY the change was made (only WHAT)
+- Description is missing test plan, migration steps, or breaking change notes when applicable
+
+Skip this section entirely if the title and description are adequate.
+
 ## Output Format
 Use this exact structure:
 
 ### Tóm tắt
 [2-3 sentences summarizing what the PR does and its impact]
+
+### PR Metadata
+[Only include if there are issues with the title or description. Suggest a better title if needed.]
 
 ### Findings
 [List findings grouped by severity, each with file:line reference]
