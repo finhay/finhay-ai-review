@@ -1,4 +1,4 @@
-// LLM client — OpenAI-compatible API (Minimax M2.7, etc.)
+// LLM client — OpenAI-compatible API
 
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 1000;

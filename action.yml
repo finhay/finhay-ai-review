@@ -1,10 +1,10 @@
 name: 'Finhay AI Review'
-description: 'AI-powered PR review using Minimax M2.7 (OpenAI-compatible)'
+description: 'AI-powered PR review using any OpenAI-compatible API'
 author: 'Finhay Tech'
 
 inputs:
   model:
-    description: 'LLM model name'
+    description: 'LLM model name (e.g. gpt-4o, claude-sonnet-4-20250514, gemini-2.5-flash, deepseek-chat)'
     default: 'MiniMax-M2.7'
   api_base:
     description: 'OpenAI-compatible API base URL'
@@ -14,7 +14,7 @@ inputs:
     required: true
   trigger_word:
     description: 'Trigger word for interactive mode'
-    default: '@kai-review'
+    default: '@finhay-review'
   auto_review:
     description: 'Enable auto review on PR open/push'
     default: 'true'
