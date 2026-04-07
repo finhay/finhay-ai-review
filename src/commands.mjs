@@ -1,10 +1,10 @@
-// Command parser for @kai-review mentions
+// Command parser for @finhay-review mentions
 
 /**
  * Parse a comment body for commands
  * Returns { type, args } or null if no trigger found
  */
-export function parseCommand(body, triggerWord = '@kai-review') {
+export function parseCommand(body, triggerWord = '@finhay-review') {
   if (!body) return null;
 
   const trigger = triggerWord.toLowerCase();

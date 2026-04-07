@@ -178,7 +178,7 @@ export async function minimizeComment(owner, repo, commentNodeId) {
  * Extract last reviewed SHA from bot's review body
  */
 export function extractLastReviewedSha(reviewBody) {
-  const match = reviewBody?.match(/<!-- kai-review-meta: ({.*?}) -->/);
+  const match = reviewBody?.match(/<!-- finhay-review-meta: ({.*?}) -->/);
   if (!match) return null;
   try {
     return JSON.parse(match[1]).sha;

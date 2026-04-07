@@ -179,7 +179,7 @@ NO_LEARNING`;
 
 export function formatReviewBody(content, sha, model) {
   const meta = JSON.stringify({ sha, model, ts: new Date().toISOString() });
-  return `<!-- kai-review-meta: ${meta} -->\n\n## 🔍 AI Code Review\n\n${content}`;
+  return `<!-- finhay-review-meta: ${meta} -->\n\n## 🔍 AI Code Review\n\n${content}`;
 }
 
 export function fixPrompt({ finding, fileContent, filename }) {
@@ -203,7 +203,7 @@ Keep the fix minimal — only change what's necessary to resolve the issue.`;
 }
 
 export function helpText(triggerWord) {
-  return `## 🤖 Kai Review — Commands
+  return `## 🤖 Finhay Review — Commands
 
 | Command | Description |
 |---------|-------------|

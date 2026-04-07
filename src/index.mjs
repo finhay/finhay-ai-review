@@ -17,7 +17,7 @@ async function main() {
     model: getInput('model', 'MiniMax-M2.7'),
     apiBase: getInput('api_base', 'https://api.minimaxi.chat/v1'),
     apiKey: getInput('api_key'),
-    triggerWord: getInput('trigger_word', '@kai-review'),
+    triggerWord: getInput('trigger_word', '@finhay-review'),
     autoReview: getInput('auto_review', 'true') === 'true',
     maxDiffLines: parseInt(getInput('max_diff_lines', '10000')),
     language: getInput('language', 'vi'),
