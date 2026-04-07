@@ -33,9 +33,6 @@ inputs:
   conventions_file:
     description: 'Path to conventions file'
     default: '.github/review-conventions.md'
-  github_token:
-    description: 'GitHub token for API calls'
-    default: ''
 
 runs:
   using: 'node20'

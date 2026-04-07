@@ -24,7 +24,7 @@ async function main() {
     reviewLevel: getInput('review_level', 'standard'),
     includeNitpicks: getInput('include_nitpicks', 'false') === 'true',
     conventionsFile: getInput('conventions_file', '.github/review-conventions.md'),
-    githubToken: getInput('github_token') || process.env.GITHUB_TOKEN || process.env.INPUT_GITHUB_TOKEN,
+    githubToken: process.env.GITHUB_TOKEN,
   };
 
   if (!config.apiKey) {

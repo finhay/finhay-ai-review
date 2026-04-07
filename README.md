@@ -54,7 +54,6 @@ jobs:
           model: gpt-4o                          # or any OpenAI-compatible model
           api_base: https://api.openai.com/v1    # any OpenAI-compatible endpoint
           api_key: ${{ secrets.LLM_API_KEY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 ### 3. Done! 🎉
