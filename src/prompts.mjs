@@ -96,14 +96,15 @@ if (!order) throw new OrderNotFoundError(id);
 \`\`\``;
 
   if (conventions) {
-    prompt += `\n\n## Team Conventions\n${conventions}`;
+    prompt += `\n\n<team_conventions>\n${conventions}\n</team_conventions>`;
   }
 
   if (learnings && learnings.length > 0) {
-    prompt += '\n\n## Team Learnings (from past reviews)\n';
+    prompt += '\n\n<team_learnings>\n';
     for (const l of learnings) {
       prompt += `- ${l.rule}${l.context ? ` (applies to: ${l.context})` : ''}\n`;
     }
+    prompt += '</team_learnings>';
   }
 
   return prompt;
@@ -114,20 +115,17 @@ export function reviewPrompt({ prTitle, prDescription, diff, isIncremental, file
     ? 'This is an INCREMENTAL review — only review the NEW changes below. Do not repeat findings from previous reviews.'
     : 'This is a FULL review of the entire PR.';
 
-  let prompt = `## PR: ${prTitle}
+  let prompt = `<pr_title>${prTitle}</pr_title>\n\n${mode}`;
 
-${prDescription ? `### Description\n${prDescription}\n` : ''}
-${mode}`;
-
-  if (fileManifest) {
-    prompt += `\n\n### Changed Files\n${fileManifest}\n`;
+  if (prDescription) {
+    prompt += `\n\n<pr_description>\n${prDescription}\n</pr_description>`;
   }
 
-  prompt += `
-### Code Changes
-\`\`\`diff
-${diff}
-\`\`\`
+  if (fileManifest) {
+    prompt += `\n\n<changed_files>\n${fileManifest}\n</changed_files>`;
+  }
+
+  prompt += `\n\n<code_diff>\n${diff}\n</code_diff>
 
 Review the changes above and provide your analysis.`;
 
@@ -135,28 +133,36 @@ Review the changes above and provide your analysis.`;
 }
 
 export function interactivePrompt({ question, prTitle, prDescription, diff, fileContext }) {
-  let prompt = `## Context: PR "${prTitle}"
-${prDescription ? `Description: ${prDescription}\n` : ''}`;
+  let prompt = `<pr_title>${prTitle}</pr_title>`;
 
-  if (fileContext) {
-    prompt += `\n### Relevant Code\n\`\`\`\n${fileContext}\n\`\`\`\n`;
-  } else if (diff) {
-    prompt += `\n### PR Diff\n\`\`\`diff\n${diff.slice(0, 8000)}\n\`\`\`\n`;
+  if (prDescription) {
+    prompt += `\n\n<pr_description>\n${prDescription}\n</pr_description>`;
   }
 
-  prompt += `\n### Question\n${question}\n\nAnswer the question based on the code context above. Be specific and helpful.`;
+  if (fileContext) {
+    prompt += `\n\n<code_context>\n${fileContext}\n</code_context>`;
+  } else if (diff) {
+    prompt += `\n\n<code_diff>\n${diff.slice(0, 8000)}\n</code_diff>`;
+  }
+
+  prompt += `\n\n<question>\n${question}\n</question>
+
+Answer the question based on the code context above. Be specific and helpful.`;
   return prompt;
 }
 
 export function summaryPrompt({ prTitle, prDescription, files, diff }) {
   const fileList = files.map(f => `- ${f.filename} (+${f.additions}/-${f.deletions})`).join('\n');
-  let prompt = `## PR: ${prTitle}
-${prDescription ? `Description: ${prDescription}\n` : ''}
-### Changed Files
-${fileList}`;
+  let prompt = `<pr_title>${prTitle}</pr_title>`;
+
+  if (prDescription) {
+    prompt += `\n\n<pr_description>\n${prDescription}\n</pr_description>`;
+  }
+
+  prompt += `\n\n<changed_files>\n${fileList}\n</changed_files>`;
 
   if (diff) {
-    prompt += `\n\n### Code Changes (truncated)\n\`\`\`diff\n${diff}\n\`\`\``;
+    prompt += `\n\n<code_diff>\n${diff}\n</code_diff>`;
   }
 
   prompt += `
