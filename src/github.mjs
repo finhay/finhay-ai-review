@@ -191,6 +191,17 @@ export async function updatePR(owner, repo, prNumber, { title, description }) {
 }
 
 /**
+ * Update a review body (e.g., to mark as outdated)
+ */
+export async function updateReview(owner, repo, prNumber, reviewId, body) {
+  const res = await ghFetch(`/repos/${owner}/${repo}/pulls/${prNumber}/reviews/${reviewId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ body }),
+  });
+  return res.ok;
+}
+
+/**
  * Minimize (hide) a comment
  */
 export async function minimizeComment(owner, repo, commentNodeId) {

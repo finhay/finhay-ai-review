@@ -99,12 +99,19 @@ async function handlePullRequest(event, owner, repo, config) {
 
   // Get diff
   let diff;
+  let fullDiff; // Always keep full PR diff for inline comment positioning
   if (isIncremental && lastSha) {
     console.log(`Incremental review: ${lastSha}...${headSha}`);
-    diff = await gh.getCompare(owner, repo, lastSha, headSha);
+    const [incrementalDiff, prDiff] = await Promise.all([
+      gh.getCompare(owner, repo, lastSha, headSha),
+      gh.getPRDiff(owner, repo, prNumber),
+    ]);
+    diff = incrementalDiff;
+    fullDiff = prDiff;
   } else {
     console.log('Full review');
     diff = await gh.getPRDiff(owner, repo, prNumber);
+    fullDiff = diff;
   }
 
   if (!diff || diff.trim().length === 0) {
@@ -201,8 +208,8 @@ async function handlePullRequest(event, owner, repo, config) {
   }
   reviewContent = prMeta.cleanContent;
 
-  // Parse findings for inline comments
-  const { inlineComments, reviewBody } = buildInlineComments(reviewContent, diff);
+  // Parse findings for inline comments (use full PR diff for line positioning)
+  const { inlineComments, reviewBody } = buildInlineComments(reviewContent, fullDiff);
   let body = formatReviewBody(reviewBody, headSha, config.model);
 
   // Try with inline comments, fall back to body-only if GitHub rejects them

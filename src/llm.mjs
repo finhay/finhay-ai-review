@@ -2,25 +2,34 @@
 
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 1000;
+const REQUEST_TIMEOUT_MS = 120_000; // 2 minutes per request
 
 export async function chat(messages, { apiBase, apiKey, model, temperature = 0.1, maxTokens = 4096 }) {
   const url = `${apiBase.replace(/\/$/, '')}/chat/completions`;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          temperature,
-          max_tokens: maxTokens,
-        }),
-      });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      let res;
+      try {
+        res = await fetch(url, {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature,
+            max_tokens: maxTokens,
+          }),
+        });
+      } finally {
+        clearTimeout(timer);
+      }
 
       if (res.status === 429 || res.status >= 500) {
         const wait = RETRY_BASE_MS * Math.pow(2, attempt);

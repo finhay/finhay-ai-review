@@ -54,6 +54,7 @@ concurrency:
 jobs:
   review:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: |
       github.event_name == 'pull_request' ||
       contains(github.event.comment.body, '@finhay-review')
