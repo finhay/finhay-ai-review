@@ -24,12 +24,16 @@ async function main() {
     reviewLevel: getInput('review_level', 'standard'),
     includeNitpicks: getInput('include_nitpicks', 'false') === 'true',
     conventionsFile: getInput('conventions_file', '.github/review-conventions.md'),
-    githubToken: process.env.GITHUB_TOKEN,
+    githubToken: getInput('github_token') || process.env.GITHUB_TOKEN,
   };
 
   if (!config.apiKey) {
     console.error('❌ api_key is required');
     process.exit(1);
+  }
+
+  if (!config.githubToken) {
+    console.warn('⚠️ No GitHub token found. API calls will likely fail.');
   }
 
   gh.init(config.githubToken);

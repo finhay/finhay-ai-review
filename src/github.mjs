@@ -49,7 +49,11 @@ export async function getPRDiff(owner, repo, prNumber) {
   const res = await ghFetch(`/repos/${owner}/${repo}/pulls/${prNumber}`, {
     headers: { 'Accept': 'application/vnd.github.v3.diff' },
   });
-  return res.ok ? res.text() : '';
+  if (!res.ok) {
+    console.error(`Failed to fetch PR diff: ${res.status} ${res.statusText}`);
+    return '';
+  }
+  return res.text();
 }
 
 /**
@@ -75,7 +79,11 @@ export async function getCompare(owner, repo, baseSha, headSha) {
   const res = await ghFetch(`/repos/${owner}/${repo}/compare/${baseSha}...${headSha}`, {
     headers: { 'Accept': 'application/vnd.github.v3.diff' },
   });
-  return res.ok ? res.text() : '';
+  if (!res.ok) {
+    console.error(`Failed to fetch compare diff: ${res.status} ${res.statusText}`);
+    return '';
+  }
+  return res.text();
 }
 
 /**
