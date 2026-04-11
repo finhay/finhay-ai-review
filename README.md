@@ -11,15 +11,25 @@ AI-powered PR review action hỗ trợ bất kỳ OpenAI-compatible API (OpenAI,
 - 📚 **Learnings** — Ghi nhớ team preferences, review càng dùng càng đúng
 - 📏 **Conventions** — Load coding conventions từ repo
 - 🎯 **Severity Levels** — Critical → Major → Minor → Nitpick
+- 📝 **PR Metadata Auto-fix** — Tự động reformat PR title theo conventional commits và generate description
 
 ## Quick Start (2 phút)
 
-### 1. Tạo secret
+### Option A: Organization-wide setup (khuyến nghị)
 
-Thêm API key vào repo secrets (ví dụ `LLM_API_KEY`):
-**Settings → Secrets and variables → Actions → New repository secret**
+Cấu hình 1 lần cho toàn bộ org, mọi repo dùng chung.
 
-### 2. Tạo workflow
+#### 1. Tạo org variables & secret
+
+Vào **Organization Settings → Secrets and variables → Actions**:
+
+| Type | Name | Value |
+|------|------|-------|
+| Variable | `AI_REVIEW_MODEL` | `MiniMax-M2.7` (hoặc `gpt-4o`, `deepseek-chat`, ...) |
+| Variable | `AI_REVIEW_API_BASE` | `https://api.minimaxi.chat/v1` (hoặc endpoint tương ứng) |
+| Secret | `AI_REVIEW_API_KEY` | API key của provider |
+
+#### 2. Tạo workflow trong mỗi repo
 
 ```yaml
 # .github/workflows/ai-review.yml
@@ -51,8 +61,20 @@ jobs:
       - uses: actions/checkout@v4
       - uses: finhay/finhay-ai-review@v1
         with:
-          model: gpt-4o                          # or any OpenAI-compatible model
-          api_base: https://api.openai.com/v1    # any OpenAI-compatible endpoint
+          model: ${{ vars.AI_REVIEW_MODEL }}
+          api_base: ${{ vars.AI_REVIEW_API_BASE }}
+          api_key: ${{ secrets.AI_REVIEW_API_KEY }}
+```
+
+Muốn đổi model? Chỉ cần update org variable — tất cả repos tự apply.
+
+### Option B: Per-repo setup
+
+```yaml
+      - uses: finhay/finhay-ai-review@v1
+        with:
+          model: gpt-4o
+          api_base: https://api.openai.com/v1
           api_key: ${{ secrets.LLM_API_KEY }}
 ```
 
@@ -79,18 +101,19 @@ Comment `@finhay-review` + command trong PR:
 
 ### Action Inputs
 
-| Input | Default | Mô tả |
-|-------|---------|--------|
-| `model` | `MiniMax-M2.7` | Tên model LLM (e.g. `gpt-4o`, `deepseek-chat`) |
-| `api_base` | `https://api.minimaxi.chat/v1` | OpenAI-compatible API endpoint |
-| `api_key` | (required) | API key |
-| `trigger_word` | `@finhay-review` | Keyword trigger |
-| `auto_review` | `true` | Auto review on PR open |
-| `max_diff_lines` | `10000` | Skip nếu diff lớn hơn |
-| `language` | `vi` | Ngôn ngữ review (vi/en) |
-| `review_level` | `standard` | Mức độ: relaxed/standard/strict |
-| `include_nitpicks` | `false` | Bao gồm nitpick comments |
-| `conventions_file` | `.github/review-conventions.md` | File coding conventions |
+| Input | Default | Org var/secret | Mô tả |
+|-------|---------|----------------|--------|
+| `model` | `MiniMax-M2.7` | `AI_REVIEW_MODEL` | Tên model LLM |
+| `api_base` | `https://api.minimaxi.chat/v1` | `AI_REVIEW_API_BASE` | OpenAI-compatible API endpoint |
+| `api_key` | (required) | `AI_REVIEW_API_KEY` | API key |
+| `github_token` | `${{ github.token }}` | — | GitHub token (auto-provided) |
+| `trigger_word` | `@finhay-review` | — | Keyword trigger |
+| `auto_review` | `true` | — | Auto review on PR open |
+| `max_diff_lines` | `10000` | — | Skip nếu diff lớn hơn |
+| `language` | `vi` | — | Ngôn ngữ review (vi/en) |
+| `review_level` | `standard` | — | Mức độ: relaxed/standard/strict |
+| `include_nitpicks` | `false` | — | Bao gồm nitpick comments |
+| `conventions_file` | `.github/review-conventions.md` | — | File coding conventions |
 
 ### Conventions File
 
@@ -129,6 +152,17 @@ Learnings lưu tại `.github/review-learnings.json`:
 
 Learnings hỗ trợ path-based matching — rule chỉ apply cho files match glob pattern.
 
+### PR Metadata Auto-fix
+
+Bot tự động cải thiện PR title và description trong mỗi review:
+
+- **Title** — Reformat theo [Conventional Commits](https://www.conventionalcommits.org/) (`type(scope): subject`)
+  - Branch names (`feature/xyz`) → rewrite dựa trên diff
+  - Descriptive nhưng sai format (`Add JWT validation`) → `feat(auth): add JWT validation`
+  - Fix typos
+- **Description** — Generate nếu trống, cải thiện nếu thiếu cấu trúc (giữ nguyên thông tin gốc)
+- Review comment giải thích những gì đã thay đổi
+
 ## Architecture
 
 ```
@@ -138,6 +172,7 @@ GitHub Event
     │                       ├── Load conventions + learnings
     │                       ├── Chunk diff by file (if large)
     │                       ├── Call LLM API
+    │                       ├── Auto-fix PR title & description
     │                       └── Post PR Review (with severity)
     │
     ├── Comment @finhay-review ──→ Command Parser
