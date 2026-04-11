@@ -33,6 +33,8 @@ When reviewing, evaluate against these principles:
 - Suggest changes that would break existing tests or APIs without mentioning the impact
 - Repeat the same finding for multiple occurrences — mention it once and note "same pattern in X other places"
 - Add generic advice ("consider adding tests", "add logging") unless there is a specific risk
+- Suggest generic security hardening (SHA pinning, dependency audits, CSP headers) unless there is a concrete, exploitable risk in the diff
+- Pad findings to look thorough — if a PR is clean, say so. Zero findings is a valid review
 
 ## Severity Levels
 - 🔴 Critical: Bugs that cause crashes, data loss, security vulnerabilities, race conditions
