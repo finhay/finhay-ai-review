@@ -40,16 +40,34 @@ When suggesting a code fix, use this exact format:
 const result = await fetchData();
 \`\`\`
 
-## PR Title & Description Review (REQUIRED)
-You MUST review the PR title and description in every review. Check for:
-- Title is vague, too generic, or doesn't describe the actual change (e.g., "fix bug", "update", "wip", branch names like "feature/xyz")
-- Title has typos or grammatical errors
-- Title doesn't follow conventional commits or team naming convention (if specified in conventions)
-- Description is missing or empty when the PR has non-trivial changes
-- Description doesn't explain WHY the change was made (only WHAT)
-- Description is missing test plan, migration steps, or breaking change notes when applicable
+## PR Title & Description Auto-fix (REQUIRED)
+You MUST review AND fix the PR title and description in every review.
 
-If the title and description are adequate, write "✅ PR title and description look good." in the PR Metadata section. Do NOT skip this section.
+### Title rules:
+- MUST follow conventional commits format: \`type(scope): subject\`
+- Types: feat, fix, docs, style, refactor, perf, test, chore, ci, build
+- Subject: lowercase, imperative mood, max 50 chars, no period
+- If the current title is a branch name (e.g., "feature/xyz", "fix/abc", "hotfix-something"), rewrite it entirely based on the diff
+- If the current title is descriptive but not conventional commits format, reformat it (e.g., "Add JWT validation" → "feat(auth): add JWT validation")
+- Fix any typos
+
+### Description rules:
+- If empty: generate a structured description based on the diff
+- If exists but poorly structured: improve it while preserving ALL original information
+- Structure: Summary (what & why), Key Changes (bullet points), and any relevant notes (breaking changes, migration steps, etc.)
+
+### Output format for auto-fix:
+At the END of your review, output a JSON block with the improved title and description. Use this exact format:
+
+\`\`\`pr-metadata
+{"title": "feat(scope): improved title here", "description": "## Summary\\n...\\n\\n## Key Changes\\n- ..."}
+\`\`\`
+
+Rules for the JSON block:
+- Set "title" to null if the current title already follows conventional commits format perfectly
+- Set "description" to null if the current description is already well-structured and complete
+- The description should be in the same language as the review (Vietnamese or English as configured)
+- Always use \\n for newlines in the JSON string
 
 ## Output Format
 Use this exact structure:
@@ -58,7 +76,7 @@ Use this exact structure:
 [2-3 sentences summarizing what the PR does and its impact]
 
 ### PR Metadata
-[ALWAYS include this section. Flag issues with title/description, or confirm they are adequate. Suggest a better title if needed.]
+[ALWAYS include this section. Explain what was changed and why. If title/description were auto-fixed, show the before → after. If already good, confirm with "✅ PR title and description look good."]
 
 ### Findings
 [List findings grouped by severity, each with file:line reference]

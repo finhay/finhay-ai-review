@@ -9,7 +9,7 @@ import {
 } from './prompts.mjs';
 import { loadLearnings, filterLearnings, learningConfirmationMessage } from './learnings.mjs';
 import { parseCommand, isPaused } from './commands.mjs';
-import { getInput, parseRepo, readEventPayload, countDiffLines, truncate, sanitize, parseDiffMap, parseFindings } from './utils.mjs';
+import { getInput, parseRepo, readEventPayload, countDiffLines, truncate, sanitize, parseDiffMap, parseFindings, extractPRMetadata } from './utils.mjs';
 
 async function main() {
   // --- Load config ---
@@ -187,6 +187,19 @@ async function handlePullRequest(event, owner, repo, config) {
     reviewContent = res.content;
     console.log(`Tokens: ${JSON.stringify(res.usage)}`);
   }
+
+  // Extract and apply PR metadata auto-fix
+  const prMeta = extractPRMetadata(reviewContent);
+  if (prMeta.title || prMeta.description) {
+    const updated = await gh.updatePR(owner, repo, prNumber, {
+      title: prMeta.title,
+      description: prMeta.description,
+    });
+    if (updated) {
+      console.log(`📝 PR metadata updated${prMeta.title ? ` — title: "${prMeta.title}"` : ''}${prMeta.description ? ' — description updated' : ''}`);
+    }
+  }
+  reviewContent = prMeta.cleanContent;
 
   // Parse findings for inline comments
   const { inlineComments, reviewBody } = buildInlineComments(reviewContent, diff);

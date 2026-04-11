@@ -171,6 +171,26 @@ export async function getFileContent(owner, repo, path, ref = 'HEAD') {
 }
 
 /**
+ * Update PR title and/or description
+ */
+export async function updatePR(owner, repo, prNumber, { title, description }) {
+  const payload = {};
+  if (title) payload.title = title;
+  if (description) payload.body = description;
+  if (Object.keys(payload).length === 0) return true;
+
+  const res = await ghFetch(`/repos/${owner}/${repo}/pulls/${prNumber}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    console.error(`Failed to update PR: ${res.status} ${err.slice(0, 300)}`);
+  }
+  return res.ok;
+}
+
+/**
  * Minimize (hide) a comment
  */
 export async function minimizeComment(owner, repo, commentNodeId) {

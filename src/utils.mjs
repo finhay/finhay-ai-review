@@ -109,6 +109,25 @@ export function parseDiffMap(diffText) {
 }
 
 /**
+ * Extract and strip the pr-metadata JSON block from review content.
+ * Returns { title, description, cleanContent } where title/description are null if no change needed.
+ */
+export function extractPRMetadata(reviewContent) {
+  const match = reviewContent.match(/```pr-metadata\n([\s\S]*?)\n```/);
+  if (!match) return { title: null, description: null, cleanContent: reviewContent };
+
+  const cleanContent = reviewContent.replace(/\n*```pr-metadata\n[\s\S]*?\n```\n*/g, '').trim();
+
+  try {
+    const { title, description } = JSON.parse(match[1]);
+    return { title: title || null, description: description || null, cleanContent };
+  } catch {
+    console.error('Failed to parse pr-metadata JSON block');
+    return { title: null, description: null, cleanContent };
+  }
+}
+
+/**
  * Parse review markdown into structured findings for inline comments.
  * Returns { summary, findings: [{ severity, severityLabel, title, file, line, body, raw }], positives }
  */
