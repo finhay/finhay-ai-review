@@ -90,7 +90,7 @@ async function handlePullRequest(event, owner, repo, config) {
   const safeBody = sanitize(safeCtx.body);
   const prNumber = pr.number;
   const headSha = pr.head.sha;
-  const botLogin = getBotLogin();
+  const botLogin = await gh.getBotLogin();
 
   console.log(`PR #${prNumber}: ${safeCtx.title} (${event.action})`);
 
@@ -257,7 +257,7 @@ async function handleIssueComment(event, owner, repo, config) {
   const issue = event.issue;
 
   // Skip bot's own comments
-  if (comment.user.login === getBotLogin()) return;
+  if (comment.user.login === await gh.getBotLogin()) return;
 
   // Only handle PR comments (issues have no pull_request key)
   if (!issue.pull_request) return;
@@ -352,7 +352,7 @@ async function handleIssueComment(event, owner, repo, config) {
 // ===== Review comment reply (inline code comment) =====
 async function handleReviewComment(event, owner, repo, config) {
   const comment = event.comment;
-  if (comment.user.login === getBotLogin()) return;
+  if (comment.user.login === await gh.getBotLogin()) return;
 
   const cmd = parseCommand(comment.body, config.triggerWord);
   if (!cmd) {
@@ -422,7 +422,7 @@ async function detectLearning(event, owner, repo, config) {
 
   // Fetch the parent comment to get the actual bot review text
   const parentComment = await gh.getReviewComment(owner, repo, comment.in_reply_to_id);
-  if (!parentComment || parentComment.user?.login !== getBotLogin()) return;
+  if (!parentComment || parentComment.user?.login !== await gh.getBotLogin()) return;
 
   const prompt = learningDetectionPrompt({
     botComment: parentComment.body,
@@ -533,9 +533,6 @@ function buildFileManifest(prFiles) {
   return lines.join('\n');
 }
 
-function getBotLogin() {
-  return 'github-actions[bot]';
-}
 
 // Only auto-run in GitHub Actions context (allows test imports without triggering main)
 if (process.env.GITHUB_EVENT_PATH) main();

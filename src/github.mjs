@@ -3,11 +3,30 @@
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 2000;
 
-let _token, _apiBase;
+let _token, _apiBase, _botLogin;
 
 export function init(token, apiBase = 'https://api.github.com') {
   _token = token;
   _apiBase = apiBase;
+  _botLogin = null;
+}
+
+/**
+ * Get the authenticated bot login (cached after first call).
+ * Works with both GITHUB_TOKEN (github-actions[bot]) and GitHub App tokens (app-name[bot]).
+ */
+export async function getBotLogin() {
+  if (_botLogin) return _botLogin;
+  try {
+    const res = await ghFetch('/user');
+    if (res.ok) {
+      const data = await res.json();
+      _botLogin = data.login;
+      return _botLogin;
+    }
+  } catch { /* fall through */ }
+  _botLogin = 'github-actions[bot]';
+  return _botLogin;
 }
 
 async function ghFetch(path, options = {}) {

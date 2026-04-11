@@ -19,7 +19,7 @@ AI-powered PR review action hỗ trợ bất kỳ OpenAI-compatible API (OpenAI,
 
 Cấu hình 1 lần cho toàn bộ org, mọi repo dùng chung.
 
-#### 1. Tạo org variables & secret
+#### 1. Tạo org variables & secrets
 
 Vào **Organization Settings → Secrets and variables → Actions**:
 
@@ -29,7 +29,22 @@ Vào **Organization Settings → Secrets and variables → Actions**:
 | Variable | `AI_REVIEW_API_BASE` | `https://api.minimaxi.chat/v1` (hoặc endpoint tương ứng) |
 | Secret | `AI_REVIEW_API_KEY` | API key của provider |
 
-#### 2. Tạo workflow trong mỗi repo
+#### 2. (Tuỳ chọn) Custom bot name & avatar với GitHub App
+
+Mặc định review hiển thị là `github-actions[bot]`. Muốn custom tên và avatar:
+
+1. Tạo **GitHub App** trong org: **Settings → Developer settings → GitHub Apps → New**
+   - Đặt tên (vd: "Finhay AI Reviewer"), upload avatar
+   - Permissions: `Pull requests: Read & Write`, `Contents: Read`, `Issues: Read & Write`
+2. Install app vào org
+3. Thêm vào org variables & secrets:
+
+| Type | Name | Value |
+|------|------|-------|
+| Variable | `AI_REVIEW_APP_ID` | App ID (từ trang settings của app) |
+| Secret | `AI_REVIEW_APP_PRIVATE_KEY` | Private key (generate từ trang settings) |
+
+#### 3. Tạo workflow trong mỗi repo
 
 ```yaml
 # .github/workflows/ai-review.yml
@@ -60,12 +75,23 @@ jobs:
       contains(github.event.comment.body, '@finhay-review')
     steps:
       - uses: actions/checkout@v4
+
+      # Nếu dùng GitHub App (custom bot name/avatar):
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ vars.AI_REVIEW_APP_ID }}
+          private-key: ${{ secrets.AI_REVIEW_APP_PRIVATE_KEY }}
+
       - uses: finhay/finhay-ai-review@v1
         with:
           model: ${{ vars.AI_REVIEW_MODEL }}
           api_base: ${{ vars.AI_REVIEW_API_BASE }}
           api_key: ${{ secrets.AI_REVIEW_API_KEY }}
+          github_token: ${{ steps.app-token.outputs.token }}
 ```
+
+> **Không dùng GitHub App?** Bỏ step `create-github-app-token` và xoá dòng `github_token` — action sẽ dùng `GITHUB_TOKEN` mặc định (hiển thị là `github-actions[bot]`).
 
 Muốn đổi model? Chỉ cần update org variable — tất cả repos tự apply.
 
@@ -107,7 +133,7 @@ Comment `@finhay-review` + command trong PR:
 | `model` | `MiniMax-M2.7` | `AI_REVIEW_MODEL` | Tên model LLM |
 | `api_base` | `https://api.minimaxi.chat/v1` | `AI_REVIEW_API_BASE` | OpenAI-compatible API endpoint |
 | `api_key` | (required) | `AI_REVIEW_API_KEY` | API key |
-| `github_token` | `${{ github.token }}` | — | GitHub token (auto-provided) |
+| `github_token` | `${{ github.token }}` | `AI_REVIEW_APP_ID` + `AI_REVIEW_APP_PRIVATE_KEY` | GitHub token (dùng App token để custom bot name/avatar) |
 | `trigger_word` | `@finhay-review` | — | Keyword trigger |
 | `auto_review` | `true` | — | Auto review on PR open |
 | `max_diff_lines` | `10000` | — | Skip nếu diff lớn hơn |

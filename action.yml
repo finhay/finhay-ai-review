@@ -34,7 +34,7 @@ inputs:
     description: 'Path to conventions file'
     default: '.github/review-conventions.md'
   github_token:
-    description: 'GitHub token for API access (auto-provided by GitHub Actions)'
+    description: 'GitHub token for API access. Use a GitHub App token for custom bot name/avatar, or leave default for github-actions[bot]'
     default: ${{ github.token }}
 
 runs:
