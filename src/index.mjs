@@ -11,6 +11,23 @@ import { loadLearnings, filterLearnings, learningConfirmationMessage } from './l
 import { parseCommand, isPaused } from './commands.mjs';
 import { getInput, parseRepo, readEventPayload, countDiffLines, truncate, sanitize, parseDiffMap, parseFindings, extractPRMetadata } from './utils.mjs';
 
+/**
+ * Build a safe PR context that prefers webhook payload data (captured at trigger time)
+ * over fetched data, preventing TOCTOU attacks where attackers edit PR content
+ * between trigger and processing.
+ */
+export function buildSafeContext(webhookPR, fetchedPR = null) {
+  const merged = fetchedPR || webhookPR;
+  return {
+    title: webhookPR.title ?? merged.title,
+    body: webhookPR.body ?? merged.body ?? '',
+    headSha: merged.head?.sha,
+    headRef: merged.head?.ref,
+    number: webhookPR.number ?? merged.number,
+    raw: merged,
+  };
+}
+
 async function main() {
   // --- Load config ---
   const config = {
@@ -68,11 +85,14 @@ async function handlePullRequest(event, owner, repo, config) {
   }
 
   const pr = event.pull_request;
+  const safeCtx = buildSafeContext(pr);
+  const safeTitle = sanitize(safeCtx.title);
+  const safeBody = sanitize(safeCtx.body);
   const prNumber = pr.number;
   const headSha = pr.head.sha;
   const botLogin = getBotLogin();
 
-  console.log(`PR #${prNumber}: ${pr.title} (${event.action})`);
+  console.log(`PR #${prNumber}: ${safeCtx.title} (${event.action})`);
 
   // Check if paused
   const [botReviews, botComments] = await Promise.all([
@@ -158,8 +178,8 @@ async function handlePullRequest(event, owner, repo, config) {
       const batch = fileChunks.slice(i, i + CONCURRENCY);
       const promises = batch.map(async (chunk, j) => {
         const userMsg = reviewPrompt({
-          prTitle: sanitize(pr.title),
-          prDescription: sanitize(pr.body || ''),
+          prTitle: safeTitle,
+          prDescription: safeBody,
           diff: truncate(chunk.patch, 15000),
           isIncremental,
           fileManifest,
@@ -181,8 +201,8 @@ async function handlePullRequest(event, owner, repo, config) {
   } else {
     // Single review
     const userMsg = reviewPrompt({
-      prTitle: sanitize(pr.title),
-      prDescription: sanitize(pr.body || ''),
+      prTitle: safeTitle,
+      prDescription: safeBody,
       diff: truncate(diff, 60000),
       isIncremental,
       fileManifest,
@@ -269,10 +289,14 @@ async function handleIssueComment(event, owner, repo, config) {
     case 'full_review': {
       const pr = await gh.getPR(owner, repo, prNumber);
       if (!pr) break;
-      // Reuse handlePullRequest logic
+      // Reuse handlePullRequest logic, preserving webhook title/body to prevent TOCTOU
       const fakeEvent = {
         action: cmd.type === 'full_review' ? 'opened' : 'synchronize',
-        pull_request: pr,
+        pull_request: {
+          ...pr,
+          title: issue.title ?? pr.title,
+          body: issue.body ?? pr.body,
+        },
       };
       await handlePullRequest(fakeEvent, owner, repo, { ...config, autoReview: true });
       break;
@@ -284,7 +308,9 @@ async function handleIssueComment(event, owner, repo, config) {
         gh.getPRFiles(owner, repo, prNumber),
         gh.getPRDiff(owner, repo, prNumber),
       ]);
-      const userMsg = summaryPrompt({ prTitle: sanitize(pr.title), prDescription: sanitize(pr.body), files, diff: truncate(summaryDiff, 15000) });
+      // Use webhook issue data (TOCTOU-safe) for title/body sent to LLM
+      const summaryCtx = buildSafeContext(issue, pr);
+      const userMsg = summaryPrompt({ prTitle: sanitize(summaryCtx.title), prDescription: sanitize(summaryCtx.body), files, diff: truncate(summaryDiff, 15000) });
       const res = await chat(
         [{ role: 'system', content: 'You are a helpful PR summarizer. Write in Vietnamese.' }, { role: 'user', content: userMsg }],
         { apiBase: config.apiBase, apiKey: config.apiKey, model: config.model, temperature: 0.3 }
@@ -298,10 +324,12 @@ async function handleIssueComment(event, owner, repo, config) {
         gh.getPR(owner, repo, prNumber),
         gh.getPRDiff(owner, repo, prNumber),
       ]);
+      // Use webhook issue data (TOCTOU-safe) for title/body sent to LLM
+      const chatCtx = buildSafeContext(issue, pr);
       const userMsg = interactivePrompt({
         question: cmd.args,
-        prTitle: sanitize(pr.title),
-        prDescription: sanitize(pr.body),
+        prTitle: sanitize(chatCtx.title),
+        prDescription: sanitize(chatCtx.body),
         diff: truncate(diff, 15000),
       });
       const sysPrompt = systemPrompt({
@@ -364,10 +392,11 @@ async function handleReviewComment(event, owner, repo, config) {
     await gh.replyToReviewComment(owner, repo, prNumber, comment.id, res.content);
   } else if (cmd.type === 'chat') {
     const pr = event.pull_request;
+    const safeCtx = buildSafeContext(pr);
     const userMsg = interactivePrompt({
       question: cmd.args,
-      prTitle: sanitize(pr.title),
-      prDescription: sanitize(pr.body),
+      prTitle: sanitize(safeCtx.title),
+      prDescription: sanitize(safeCtx.body),
       fileContext: comment.diff_hunk || '',
     });
     const res = await chat(
@@ -508,4 +537,5 @@ function getBotLogin() {
   return 'github-actions[bot]';
 }
 
-main();
+// Only auto-run in GitHub Actions context (allows test imports without triggering main)
+if (process.env.GITHUB_EVENT_PATH) main();
