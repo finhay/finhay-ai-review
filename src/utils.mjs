@@ -62,10 +62,20 @@ export async function readEventPayload() {
 export function sanitize(text) {
   if (!text) return '';
   return text
+    // Strip HTML comments (prompt injection vector)
     .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/[\u200B-\u200F\u2028-\u202F\uFEFF]/g, '')
-    .replace(/\[([^\]]*)\]\(javascript:(?:[^)(]*|\([^)]*\))*\)/g, '$1')
-    .replace(/<[^>]*style\s*=\s*["'][^"']*display\s*:\s*none[^"']*["'][^>]*>[\s\S]*?<\/[^>]*>/gi, '');
+    // Strip invisible Unicode: zero-width chars, bidi overrides, BOM, line/paragraph separators
+    .replace(/[\u200B-\u200F\u2028-\u202F\u2060-\u2069\uFEFF\u00AD]/g, '')
+    // Strip javascript: URLs in markdown links
+    .replace(/\[([^\]]*)\]\((?:javascript|data|vbscript):(?:[^)(]*|\([^)]*\))*\)/gi, '$1')
+    // Strip hidden CSS display:none elements
+    .replace(/<[^>]*style\s*=\s*["'][^"']*display\s*:\s*none[^"']*["'][^>]*>[\s\S]*?<\/[^>]*>/gi, '')
+    // Strip markdown image alt text (injection vector) — preserve image link
+    .replace(/!\[([^\]]+)\]\(/g, '![](')
+    // Strip markdown link title attributes
+    .replace(/(\[[^\]]*\]\([^\s)]+)\s+["'][^"']*["']\)/g, '$1)')
+    // Redact GitHub tokens
+    .replace(/\b(ghp_|gho_|ghs_|ghr_|github_pat_)[A-Za-z0-9_]+/g, '[REDACTED]');
 }
 
 /**
