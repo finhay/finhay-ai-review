@@ -108,12 +108,21 @@ async function handlePullRequest(event, owner, repo, config) {
   let isIncremental = false;
   let lastSha = null;
 
-  if (event.action === 'synchronize' && botReviews.length > 0) {
-    // Find last reviewed SHA
+  if (event.action === 'synchronize') {
+    // Prefer: last reviewed SHA from bot review body (covers reviews since last push)
     for (let i = botReviews.length - 1; i >= 0; i--) {
       lastSha = gh.extractLastReviewedSha(botReviews[i].body);
       if (lastSha) break;
     }
+
+    // Fallback: use the synchronize event's 'before' SHA.
+    // This handles cases where getBotReviews returns empty (e.g. bot login mismatch
+    // after switching to a GitHub App token) or no SHA is embedded in the review body.
+    if (!lastSha && event.before && event.before !== '0000000000000000000000000000000000000000') {
+      lastSha = event.before;
+      console.log(`No reviewed SHA found in bot reviews; using event.before as incremental base`);
+    }
+
     if (lastSha) isIncremental = true;
   }
 
