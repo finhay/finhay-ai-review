@@ -118,9 +118,9 @@ if (!order) throw new OrderNotFoundError(id);
   return prompt;
 }
 
-export function reviewPrompt({ prTitle, prDescription, diff, isIncremental, fileManifest }) {
+export function reviewPrompt({ prTitle, prDescription, diff, isIncremental, fileManifest, previousReviewSummary }) {
   const mode = isIncremental
-    ? 'This is an INCREMENTAL review — only review the NEW changes below. Do not repeat findings from previous reviews.'
+    ? 'This is an INCREMENTAL review — only review the NEW changes below. Do not repeat findings from previous reviews unless the issue still exists in the new code.'
     : 'This is a FULL review of the entire PR.';
 
   let prompt = `<pr_title>${prTitle}</pr_title>\n\n${mode}`;
@@ -131,6 +131,13 @@ export function reviewPrompt({ prTitle, prDescription, diff, isIncremental, file
 
   if (fileManifest) {
     prompt += `\n\n<changed_files>\n${fileManifest}\n</changed_files>`;
+  }
+
+  if (previousReviewSummary) {
+    prompt += `\n\n<previous_review_context>
+The following findings were already raised in earlier reviews of this PR. Use this for context — do NOT repeat these unless the new code reintroduces or worsens the issue.
+${previousReviewSummary}
+</previous_review_context>`;
   }
 
   prompt += `\n\n<code_diff>\n${diff}\n</code_diff>

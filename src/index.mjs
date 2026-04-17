@@ -165,6 +165,18 @@ async function handlePullRequest(event, owner, repo, config) {
   const relevantLearnings = filterLearnings(allLearnings, filenames);
   const fileManifest = buildFileManifest(prFiles);
 
+  // Build context from previous reviews so the LLM knows what was already flagged
+  let previousReviewSummary = '';
+  if (isIncremental && botReviews.length > 0) {
+    const bodies = botReviews
+      .slice(-3) // last 3 reviews max
+      .map(r => r.body?.replace(/<!-- finhay-review-meta:.*?-->\n?/s, '').replace(/^## 🔍 AI Code Review\n\n/, '').trim())
+      .filter(Boolean);
+    if (bodies.length > 0) {
+      previousReviewSummary = truncate(bodies.join('\n\n---\n\n'), 4000);
+    }
+  }
+
   // Build prompts
   const sysPrompt = systemPrompt({
     language: config.language,
@@ -192,6 +204,7 @@ async function handlePullRequest(event, owner, repo, config) {
           diff: truncate(chunk.patch, 15000),
           isIncremental,
           fileManifest,
+          previousReviewSummary,
         });
         try {
           const res = await chat(
@@ -215,6 +228,7 @@ async function handlePullRequest(event, owner, repo, config) {
       diff: truncate(diff, 60000),
       isIncremental,
       fileManifest,
+      previousReviewSummary,
     });
     const res = await chat(
       [{ role: 'system', content: sysPrompt }, { role: 'user', content: userMsg }],
