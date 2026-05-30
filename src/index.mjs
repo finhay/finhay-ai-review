@@ -196,7 +196,9 @@ async function handlePullRequest(event, owner, repo, config) {
     return;
   }
 
-  // Build prompts
+  // Build prompts. Only ask the model to regenerate the PR title/description
+  // on PR open — otherwise we spend tokens every push and risk rewriting an
+  // already-good title.
   const sysPrompt = systemPrompt({
     language: config.language,
     reviewLevel: config.reviewLevel,
@@ -204,6 +206,7 @@ async function handlePullRequest(event, owner, repo, config) {
     learnings: relevantLearnings,
     includeNitpicks: config.includeNitpicks,
     isIncremental,
+    autoFixMetadata: event.action === 'opened',
   });
 
   let reviewContent;

@@ -1,12 +1,45 @@
 // Prompt templates for AI review
 
-export function systemPrompt({ language, reviewLevel, conventions, learnings, includeNitpicks, isIncremental = false }) {
+export function systemPrompt({ language, reviewLevel, conventions, learnings, includeNitpicks, isIncremental = false, autoFixMetadata = true }) {
   const lang = language === 'vi' ? 'Vietnamese' : 'English';
   const strictness = {
     relaxed: 'Focus only on critical bugs and security issues. Ignore style and minor issues.',
     standard: 'Review for bugs, security, performance, and code quality. Balance thoroughness with noise reduction.',
     strict: 'Thorough review covering bugs, security, performance, code quality, naming, and patterns. Be detailed.',
   }[reviewLevel] || 'standard';
+
+  const autoFixBlock = autoFixMetadata ? `## PR Title & Description Auto-fix (REQUIRED)
+You MUST review AND fix the PR title and description in every review.
+
+### Title rules:
+- MUST follow conventional commits format: \`type(scope): subject\`
+- Types: feat, fix, docs, style, refactor, perf, test, chore, ci, build
+- Subject: lowercase, imperative mood, max 50 chars, no period
+- If the current title is a branch name (e.g., "feature/xyz", "fix/abc", "hotfix-something"), rewrite it entirely based on the diff
+- If the current title is descriptive but not conventional commits format, reformat it (e.g., "Add JWT validation" → "feat(auth): add JWT validation")
+- Fix any typos
+
+### Description rules:
+- If empty: generate a structured description based on the diff
+- If exists but poorly structured: improve it while preserving ALL original information
+- Structure: Summary (what & why), Key Changes (bullet points), and any relevant notes (breaking changes, migration steps, etc.)
+
+### Output format for auto-fix:
+At the END of your review, output a JSON block with the improved title and description. Use this exact format:
+
+\`\`\`pr-metadata
+{"title": "feat(scope): improved title here", "description": "## Summary\\n...\\n\\n## Key Changes\\n- ..."}
+\`\`\`
+
+Rules for the JSON block:
+- Set "title" to null if the current title already follows conventional commits format perfectly
+- Set "description" to null if the current description is already well-structured and complete
+- The description should be in the same language as the review (Vietnamese or English as configured)
+- Always use \\n for newlines in the JSON string` : '';
+
+  const metadataOutputSection = autoFixMetadata
+    ? '### PR Metadata\n[ALWAYS include this section. Explain what was changed and why. If title/description were auto-fixed, show the before → after. If already good, confirm with "✅ PR title and description look good."]'
+    : '';
 
   let prompt = `You are a senior code reviewer for a fintech company (securities trading, bonds, savings products).
 Your reviews are in ${lang}.
@@ -48,45 +81,17 @@ When suggesting a code fix, use this exact format:
 const result = await fetchData();
 \`\`\`
 
-## PR Title & Description Auto-fix (REQUIRED)
-You MUST review AND fix the PR title and description in every review.
-
-### Title rules:
-- MUST follow conventional commits format: \`type(scope): subject\`
-- Types: feat, fix, docs, style, refactor, perf, test, chore, ci, build
-- Subject: lowercase, imperative mood, max 50 chars, no period
-- If the current title is a branch name (e.g., "feature/xyz", "fix/abc", "hotfix-something"), rewrite it entirely based on the diff
-- If the current title is descriptive but not conventional commits format, reformat it (e.g., "Add JWT validation" → "feat(auth): add JWT validation")
-- Fix any typos
-
-### Description rules:
-- If empty: generate a structured description based on the diff
-- If exists but poorly structured: improve it while preserving ALL original information
-- Structure: Summary (what & why), Key Changes (bullet points), and any relevant notes (breaking changes, migration steps, etc.)
-
-### Output format for auto-fix:
-At the END of your review, output a JSON block with the improved title and description. Use this exact format:
-
-\`\`\`pr-metadata
-{"title": "feat(scope): improved title here", "description": "## Summary\\n...\\n\\n## Key Changes\\n- ..."}
-\`\`\`
-
-Rules for the JSON block:
-- Set "title" to null if the current title already follows conventional commits format perfectly
-- Set "description" to null if the current description is already well-structured and complete
-- The description should be in the same language as the review (Vietnamese or English as configured)
-- Always use \\n for newlines in the JSON string
+${autoFixBlock}
 
 ## Output Format
 Use this exact structure:
 
-${'### Tóm tắt'}
+### Tóm tắt
 ${isIncremental
   ? '[Only include this section if NEW changes since the last review introduce something worth summarizing. Write 1 sentence at most. If the new diff is trivial or already covered by earlier reviews, OMIT this section entirely.]'
   : '[2-3 sentences summarizing what the PR does and its impact]'}
 
-### PR Metadata
-[ALWAYS include this section. Explain what was changed and why. If title/description were auto-fixed, show the before → after. If already good, confirm with "✅ PR title and description look good."]
+${metadataOutputSection}
 
 ### Findings
 [List findings grouped by severity, each with file:line reference]

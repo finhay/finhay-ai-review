@@ -103,6 +103,22 @@ describe('systemPrompt incremental mode', () => {
   });
 });
 
+describe('systemPrompt autoFixMetadata gate', () => {
+  it('includes PR Title & Description Auto-fix block by default', () => {
+    const result = systemPrompt({ language: 'vi', reviewLevel: 'standard', conventions: '', learnings: [], includeNitpicks: false });
+    assert.ok(result.includes('PR Title & Description Auto-fix'));
+    assert.ok(result.includes('```pr-metadata'));
+    assert.ok(result.includes('### PR Metadata'));
+  });
+
+  it('omits auto-fix block when autoFixMetadata is false', () => {
+    const result = systemPrompt({ language: 'vi', reviewLevel: 'standard', conventions: '', learnings: [], includeNitpicks: false, autoFixMetadata: false });
+    assert.ok(!result.includes('PR Title & Description Auto-fix'));
+    assert.ok(!result.includes('```pr-metadata'));
+    assert.ok(!result.includes('### PR Metadata'));
+  });
+});
+
 describe('summaryPrompt XML structure', () => {
   it('wraps title in xml tag', () => {
     const result = summaryPrompt({ prTitle: 'test', prDescription: 'desc', files: [{ filename: 'a.js', additions: 1, deletions: 0 }], diff: 'diff' });
