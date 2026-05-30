@@ -88,6 +88,21 @@ describe('interactivePrompt XML structure', () => {
   });
 });
 
+describe('systemPrompt incremental mode', () => {
+  it('asks for a full 2-3 sentence Tóm tắt on full review', () => {
+    const result = systemPrompt({ language: 'vi', reviewLevel: 'standard', conventions: '', learnings: [], includeNitpicks: false, isIncremental: false });
+    assert.ok(result.includes('2-3 sentences summarizing'));
+    assert.ok(!result.includes('OMIT this section entirely'));
+  });
+
+  it('makes Tóm tắt optional on incremental review', () => {
+    const result = systemPrompt({ language: 'vi', reviewLevel: 'standard', conventions: '', learnings: [], includeNitpicks: false, isIncremental: true });
+    assert.ok(result.includes('Only include this section if NEW changes'));
+    assert.ok(result.includes('OMIT this section entirely'));
+    assert.ok(!result.includes('2-3 sentences summarizing'));
+  });
+});
+
 describe('summaryPrompt XML structure', () => {
   it('wraps title in xml tag', () => {
     const result = summaryPrompt({ prTitle: 'test', prDescription: 'desc', files: [{ filename: 'a.js', additions: 1, deletions: 0 }], diff: 'diff' });

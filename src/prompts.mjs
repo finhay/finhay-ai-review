@@ -1,6 +1,6 @@
 // Prompt templates for AI review
 
-export function systemPrompt({ language, reviewLevel, conventions, learnings, includeNitpicks }) {
+export function systemPrompt({ language, reviewLevel, conventions, learnings, includeNitpicks, isIncremental = false }) {
   const lang = language === 'vi' ? 'Vietnamese' : 'English';
   const strictness = {
     relaxed: 'Focus only on critical bugs and security issues. Ignore style and minor issues.',
@@ -80,8 +80,10 @@ Rules for the JSON block:
 ## Output Format
 Use this exact structure:
 
-### Tóm tắt
-[2-3 sentences summarizing what the PR does and its impact]
+${'### Tóm tắt'}
+${isIncremental
+  ? '[Only include this section if NEW changes since the last review introduce something worth summarizing. Write 1 sentence at most. If the new diff is trivial or already covered by earlier reviews, OMIT this section entirely.]'
+  : '[2-3 sentences summarizing what the PR does and its impact]'}
 
 ### PR Metadata
 [ALWAYS include this section. Explain what was changed and why. If title/description were auto-fixed, show the before → after. If already good, confirm with "✅ PR title and description look good."]

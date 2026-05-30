@@ -193,6 +193,7 @@ async function handlePullRequest(event, owner, repo, config) {
     conventions,
     learnings: relevantLearnings,
     includeNitpicks: config.includeNitpicks,
+    isIncremental,
   });
 
   let reviewContent;
