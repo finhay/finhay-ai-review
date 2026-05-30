@@ -9,7 +9,7 @@ import {
 } from './prompts.mjs';
 import { loadLearnings, filterLearnings, learningConfirmationMessage } from './learnings.mjs';
 import { parseCommand, isPaused } from './commands.mjs';
-import { getInput, parseRepo, readEventPayload, countDiffLines, truncate, sanitize, parseDiffMap, parseFindings, extractPRMetadata } from './utils.mjs';
+import { getInput, parseRepo, readEventPayload, countDiffLines, truncate, sanitize, parseDiffMap, parseFindings, extractPRMetadata, hasMeaningfulContent } from './utils.mjs';
 
 /**
  * Build a safe PR context that prefers webhook payload data (captured at trigger time)
@@ -177,6 +177,15 @@ async function handlePullRequest(event, owner, repo, config) {
     }
   }
 
+  // Chunk diff into per-file segments — also filters generated/lock/binary files.
+  // If nothing reviewable remains (e.g. push only touched package-lock.json),
+  // skip without posting.
+  const fileChunks = chunkDiffByFile(diff);
+  if (fileChunks.length === 0) {
+    console.log('No reviewable files after filtering (lockfiles/binaries/generated only), skipping');
+    return;
+  }
+
   // Build prompts
   const sysPrompt = systemPrompt({
     language: config.language,
@@ -186,8 +195,6 @@ async function handlePullRequest(event, owner, repo, config) {
     includeNitpicks: config.includeNitpicks,
   });
 
-  // Chunk if needed
-  const fileChunks = chunkDiffByFile(diff);
   let reviewContent;
 
   if (estimateTokens(diff) > 30000) {
@@ -236,6 +243,11 @@ async function handlePullRequest(event, owner, repo, config) {
     );
     reviewContent = res.content;
     console.log(`Tokens: ${JSON.stringify(res.usage)}`);
+  }
+
+  if (!hasMeaningfulContent(reviewContent)) {
+    console.log('LLM returned empty/non-substantive review, skipping post');
+    return;
   }
 
   // Extract and apply PR metadata auto-fix

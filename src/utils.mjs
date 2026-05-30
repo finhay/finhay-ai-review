@@ -138,6 +138,18 @@ export function extractPRMetadata(reviewContent) {
 }
 
 /**
+ * Heuristic: did the LLM actually produce a meaningful review?
+ * Returns false for near-empty or template-only output (e.g. when the model
+ * was handed a diff that consisted entirely of filtered files).
+ */
+export function hasMeaningfulContent(text) {
+  if (!text) return false;
+  const stripped = text.replace(/<!--[\s\S]*?-->/g, '').trim();
+  if (stripped.length < 80) return false;
+  return /###|🔴|🟠|🟡|🔵/.test(stripped);
+}
+
+/**
  * Parse review markdown into structured findings for inline comments.
  * Returns { summary, findings: [{ severity, severityLabel, title, file, line, body, raw }], positives }
  */

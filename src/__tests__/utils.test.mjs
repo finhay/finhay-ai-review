@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitize } from '../utils.mjs';
+import { sanitize, hasMeaningfulContent } from '../utils.mjs';
 
 describe('sanitize', () => {
   it('strips HTML comments', () => {
@@ -97,5 +97,41 @@ describe('sanitize', () => {
     assert.ok(!result.includes('\u200B'));
     assert.ok(!result.includes('ghp_'));
     assert.ok(result.includes('normal'));
+  });
+});
+
+describe('hasMeaningfulContent', () => {
+  it('returns false for empty/null/undefined', () => {
+    assert.equal(hasMeaningfulContent(''), false);
+    assert.equal(hasMeaningfulContent(null), false);
+    assert.equal(hasMeaningfulContent(undefined), false);
+  });
+
+  it('returns false when content is only the bot header', () => {
+    assert.equal(hasMeaningfulContent('## \uD83D\uDD0D AI Code Review\n\n'), false);
+  });
+
+  it('returns false when content is below the length floor', () => {
+    assert.equal(hasMeaningfulContent('short response'), false);
+  });
+
+  it('returns false when content is long but has no section headings or findings', () => {
+    const filler = 'a'.repeat(200);
+    assert.equal(hasMeaningfulContent(filler), false);
+  });
+
+  it('returns true when content has a ### heading', () => {
+    const text = '### T\u00F3m t\u1EAFt\nM\u1ED9t PR thay \u0111\u1ED5i nh\u1ECF trong x\u1EED l\u00FD l\u1ED7i auth. Kh\u00F4ng c\u00F3 r\u1EE7i ro l\u1EDBn \u2014 code \u0111\u00E3 c\u00F3 test cover.';
+    assert.equal(hasMeaningfulContent(text), true);
+  });
+
+  it('returns true when content contains severity emoji', () => {
+    const text = 'Some prose discussing the change.\n\n\uD83D\uDFE0 Major issue in src/foo.ts:12 \u2014 null deref possible.';
+    assert.equal(hasMeaningfulContent(text), true);
+  });
+
+  it('ignores HTML-comment metadata when measuring length', () => {
+    const text = '<!-- finhay-review-meta: {"sha":"abc"} -->\n## \uD83D\uDD0D AI Code Review\n\n';
+    assert.equal(hasMeaningfulContent(text), false);
   });
 });
