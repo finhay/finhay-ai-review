@@ -9,7 +9,7 @@ import {
 } from './prompts.mjs';
 import { loadLearnings, filterLearnings, learningConfirmationMessage } from './learnings.mjs';
 import { parseCommand, isPaused } from './commands.mjs';
-import { getInput, parseRepo, readEventPayload, countDiffLines, truncate, sanitize, parseDiffMap, parseFindings, extractPRMetadata, hasMeaningfulContent, reconcilePath, filterGenericFindings } from './utils.mjs';
+import { getInput, parseRepo, readEventPayload, countDiffLines, truncate, sanitize, parseDiffMap, parseFindings, extractPRMetadata, hasMeaningfulContent, reconcilePath, filterGenericFindings, isMergeCommitPush } from './utils.mjs';
 
 /**
  * Build a safe PR context that prefers webhook payload data (captured at trigger time)
@@ -102,6 +102,16 @@ async function handlePullRequest(event, owner, repo, config) {
   if (isPaused(botComments)) {
     console.log(`PR #${prNumber} is paused, skipping auto review`);
     return;
+  }
+
+  // Skip auto-review when the push is just a merge from the base branch.
+  // Manual `@finhay-review review` sets event.manual=true to bypass this.
+  if (event.action === 'synchronize' && !event.manual) {
+    const headCommit = await gh.getCommit(owner, repo, headSha);
+    if (isMergeCommitPush(headCommit)) {
+      console.log(`Head ${headSha.slice(0, 7)} is a merge commit, skipping auto review`);
+      return;
+    }
   }
 
   // Determine if incremental or full review
@@ -328,6 +338,7 @@ async function handleIssueComment(event, owner, repo, config) {
       // Reuse handlePullRequest logic, preserving webhook title/body to prevent TOCTOU
       const fakeEvent = {
         action: cmd.type === 'full_review' ? 'opened' : 'synchronize',
+        manual: true,
         pull_request: {
           ...pr,
           title: issue.title ?? pr.title,

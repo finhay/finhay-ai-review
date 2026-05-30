@@ -137,6 +137,18 @@ export function extractPRMetadata(reviewContent) {
   }
 }
 
+/**
+ * Heuristic: is this push effectively just a merge from the base branch?
+ * A commit with 2+ parents and a "Merge ..." message is almost always a
+ * merge-from-main and not new logic worth reviewing.
+ */
+export function isMergeCommitPush(commit) {
+  if (!commit) return false;
+  if (!commit.parents || commit.parents.length < 2) return false;
+  const firstLine = (commit.message || '').split('\n')[0];
+  return /^Merge\b/i.test(firstLine);
+}
+
 const GENERIC_FINDING_PATTERNS = [
   /missing\s+(file\s+)?newline|trailing\s+newline|no\s+newline\s+at\s+end\s+of\s+file/i,
   /no\s+test\s+coverage|thiếu\s+(unit\s+)?test|missing\s+unit\s+test|consider\s+adding\s+tests/i,

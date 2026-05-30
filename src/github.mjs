@@ -92,6 +92,20 @@ export async function getPRFiles(owner, repo, prNumber) {
 }
 
 /**
+ * Get a commit's metadata (message + parents). Used to detect merge commits.
+ * Returns { message, parents } or null on failure.
+ */
+export async function getCommit(owner, repo, sha) {
+  const res = await ghFetch(`/repos/${owner}/${repo}/commits/${sha}`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  return {
+    message: data.commit?.message || '',
+    parents: data.parents || [],
+  };
+}
+
+/**
  * Get diff between two commits (for incremental review)
  */
 export async function getCompare(owner, repo, baseSha, headSha) {

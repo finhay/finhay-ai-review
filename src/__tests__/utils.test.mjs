@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitize, hasMeaningfulContent, reconcilePath, filterGenericFindings } from '../utils.mjs';
+import { sanitize, hasMeaningfulContent, reconcilePath, filterGenericFindings, isMergeCommitPush } from '../utils.mjs';
 
 describe('sanitize', () => {
   it('strips HTML comments', () => {
@@ -232,5 +232,40 @@ describe('filterGenericFindings', () => {
     assert.equal(result[0].severityLabel, 'Nitpick');
     assert.ok(result[0].raw.startsWith('\uD83D\uDD35'));
     assert.ok(result[0].raw.includes('**Nitpick \u2014'));
+  });
+});
+
+describe('isMergeCommitPush', () => {
+  it('returns true for a 2-parent commit with "Merge" message', () => {
+    const commit = {
+      message: "Merge remote-tracking branch 'origin/main' into feature/x",
+      parents: [{ sha: 'a' }, { sha: 'b' }],
+    };
+    assert.equal(isMergeCommitPush(commit), true);
+  });
+
+  it('returns false for a single-parent commit even with "Merge" in subject', () => {
+    const commit = {
+      message: 'Merge logic refactor into helper',
+      parents: [{ sha: 'a' }],
+    };
+    assert.equal(isMergeCommitPush(commit), false);
+  });
+
+  it('returns false for a merge commit without "Merge" prefix', () => {
+    const commit = {
+      message: 'feat: combine branches',
+      parents: [{ sha: 'a' }, { sha: 'b' }],
+    };
+    assert.equal(isMergeCommitPush(commit), false);
+  });
+
+  it('returns false for null/undefined commit', () => {
+    assert.equal(isMergeCommitPush(null), false);
+    assert.equal(isMergeCommitPush(undefined), false);
+  });
+
+  it('returns false when parents array is missing', () => {
+    assert.equal(isMergeCommitPush({ message: 'Merge ...' }), false);
   });
 });
