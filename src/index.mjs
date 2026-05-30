@@ -9,7 +9,7 @@ import {
 } from './prompts.mjs';
 import { loadLearnings, filterLearnings, learningConfirmationMessage } from './learnings.mjs';
 import { parseCommand, isPaused } from './commands.mjs';
-import { getInput, parseRepo, readEventPayload, countDiffLines, truncate, sanitize, parseDiffMap, parseFindings, extractPRMetadata, hasMeaningfulContent } from './utils.mjs';
+import { getInput, parseRepo, readEventPayload, countDiffLines, truncate, sanitize, parseDiffMap, parseFindings, extractPRMetadata, hasMeaningfulContent, reconcilePath } from './utils.mjs';
 
 /**
  * Build a safe PR context that prefers webhook payload data (captured at trigger time)
@@ -497,10 +497,14 @@ function buildInlineComments(reviewContent, diff) {
   }
 
   const diffMap = parseDiffMap(diff);
+  const diffFiles = new Set(diffMap.keys());
   const inlineComments = [];
   const bodyFindings = [];
 
-  for (const finding of parsed.findings) {
+  for (const original of parsed.findings) {
+    const reconciled = reconcilePath(original, diffFiles);
+    const finding = { ...original, file: reconciled.file, raw: reconciled.raw };
+
     if (finding.file && finding.line && diffMap.get(finding.file)?.has(finding.line)) {
       const commentBody = finding.title
         ? `${finding.severity} **${finding.severityLabel} — ${finding.title}**\n\n${finding.body}`

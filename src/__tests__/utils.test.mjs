@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitize, hasMeaningfulContent } from '../utils.mjs';
+import { sanitize, hasMeaningfulContent, reconcilePath } from '../utils.mjs';
 
 describe('sanitize', () => {
   it('strips HTML comments', () => {
@@ -133,5 +133,56 @@ describe('hasMeaningfulContent', () => {
   it('ignores HTML-comment metadata when measuring length', () => {
     const text = '<!-- finhay-review-meta: {"sha":"abc"} -->\n## \uD83D\uDD0D AI Code Review\n\n';
     assert.equal(hasMeaningfulContent(text), false);
+  });
+});
+
+describe('reconcilePath', () => {
+  it('passes finding through when path already exists in diff', () => {
+    const finding = {
+      file: 'src/foo.ts',
+      line: 12,
+      raw: '\uD83D\uDFE0 **Major \u2014 Bug** \u2014 `src/foo.ts:12`\n\nbody',
+    };
+    const result = reconcilePath(finding, new Set(['src/foo.ts', 'src/bar.ts']));
+    assert.equal(result.file, 'src/foo.ts');
+    assert.equal(result.dropped, false);
+    assert.equal(result.raw, finding.raw);
+  });
+
+  it('rewrites path when same basename exists in a different directory', () => {
+    const finding = {
+      file: 'src/legacy/Service.ts',
+      line: 12,
+      raw: '\uD83D\uDFE1 **Minor \u2014 Issue** \u2014 `src/legacy/Service.ts:12`',
+    };
+    const diffFiles = new Set(['src/services/Service.ts']);
+    const result = reconcilePath(finding, diffFiles);
+    assert.equal(result.file, 'src/services/Service.ts');
+    assert.equal(result.dropped, false);
+    assert.ok(result.raw.includes('src/services/Service.ts'));
+    assert.ok(!result.raw.includes('src/legacy/Service.ts'));
+  });
+
+  it('drops path reference when file is renamed and no basename matches', () => {
+    // mirrors the real MinIO \u2192 FCI rename on PR #1172
+    const finding = {
+      file: 'src/infrastructure/repository/MinioRepositoryImpl.ts',
+      line: 415,
+      raw: '\uD83D\uDFE1 **Minor \u2014 Issue** \u2014 `src/infrastructure/repository/MinioRepositoryImpl.ts:415`\n\nbody text here',
+    };
+    const diffFiles = new Set(['src/infrastructure/repository/FCIStorageImpl.ts']);
+    const result = reconcilePath(finding, diffFiles);
+    assert.equal(result.file, null);
+    assert.equal(result.dropped, true);
+    assert.ok(!result.raw.includes('MinioRepositoryImpl.ts'));
+    assert.ok(result.raw.includes('body text here'));
+  });
+
+  it('returns no-op for findings without a file', () => {
+    const finding = { file: null, line: null, raw: '\uD83D\uDFE1 generic note' };
+    const result = reconcilePath(finding, new Set(['src/x.ts']));
+    assert.equal(result.file, null);
+    assert.equal(result.raw, '\uD83D\uDFE1 generic note');
+    assert.equal(result.dropped, false);
   });
 });

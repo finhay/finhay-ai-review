@@ -138,6 +138,37 @@ export function extractPRMetadata(reviewContent) {
 }
 
 /**
+ * Reconcile a finding's file path against the set of files actually in the
+ * current diff. Returns `{ file, raw }` with potentially updated values.
+ *
+ * - If `finding.file` is in `diffFiles`, no change.
+ * - If a file with the same basename exists in `diffFiles`, swap the path
+ *   (covers renames between reviews, e.g. MinioRepositoryImpl → FCIStorageImpl).
+ * - Otherwise, drop the trailing `path:line` reference from `raw` so the
+ *   rendered comment doesn't point at a path that no longer exists.
+ */
+export function reconcilePath(finding, diffFiles) {
+  if (!finding.file) return { file: finding.file, raw: finding.raw, dropped: false };
+  if (diffFiles.has(finding.file)) {
+    return { file: finding.file, raw: finding.raw, dropped: false };
+  }
+  const basename = finding.file.split('/').pop();
+  for (const candidate of diffFiles) {
+    if (candidate.split('/').pop() === basename) {
+      const rewritten = finding.raw.replaceAll(finding.file, candidate);
+      return { file: candidate, raw: rewritten, dropped: false };
+    }
+  }
+  // No match — strip the `path:line` reference from raw so we don't render a
+  // dead path. Keep severity/title prose intact.
+  const lineRef = '`' + finding.file + ':' + finding.line + '`';
+  const stripped = finding.raw
+    .replaceAll(' — ' + lineRef, '')
+    .replaceAll(lineRef, '');
+  return { file: null, raw: stripped, dropped: true };
+}
+
+/**
  * Heuristic: did the LLM actually produce a meaningful review?
  * Returns false for near-empty or template-only output (e.g. when the model
  * was handed a diff that consisted entirely of filtered files).
