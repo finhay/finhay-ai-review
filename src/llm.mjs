@@ -45,7 +45,7 @@ export async function chat(messages, { apiBase, apiKey, model, temperature = 0.1
 
       const data = await res.json();
       return {
-        content: data.choices?.[0]?.message?.content || '',
+        content: sanitizeModelOutput(data.choices?.[0]?.message?.content || ''),
         usage: data.usage || {},
       };
     } catch (err) {
@@ -84,6 +84,25 @@ export function chunkDiffByFile(diffText) {
  */
 export function estimateTokens(text) {
   return Math.ceil(text.length / 4);
+}
+
+/**
+ * Strip model artifacts that some LLMs (e.g. MiniMax) emit alongside the
+ * actual response: chain-of-thought blocks, hallucinated tool-call markers,
+ * and echoed system-prompt XML wrappers. Without this, those tokens get
+ * posted verbatim into PR comments.
+ */
+export function sanitizeModelOutput(text) {
+  if (!text) return '';
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<think>[\s\S]*$/i, '')
+    .replace(/\[TOOL_CALL\][\s\S]*?\[\/TOOL_CALL\]/g, '')
+    .replace(/^\s*\[TOOL_CALL\][\s\S]*?(?=\n{2}|$)/gm, '')
+    .replace(/<team_conventions>[\s\S]*?<\/team_conventions>/gi, '')
+    .replace(/<team_learnings>[\s\S]*?<\/team_learnings>/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function shouldSkipFile(filename) {
