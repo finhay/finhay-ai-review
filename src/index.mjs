@@ -9,7 +9,7 @@ import {
 } from './prompts.mjs';
 import { loadLearnings, filterLearnings, learningConfirmationMessage } from './learnings.mjs';
 import { parseCommand, isPaused } from './commands.mjs';
-import { getInput, parseRepo, readEventPayload, countDiffLines, truncate, sanitize, parseDiffMap, parseFindings, extractPRMetadata, hasMeaningfulContent, reconcilePath } from './utils.mjs';
+import { getInput, parseRepo, readEventPayload, countDiffLines, truncate, sanitize, parseDiffMap, parseFindings, extractPRMetadata, hasMeaningfulContent, reconcilePath, filterGenericFindings } from './utils.mjs';
 
 /**
  * Build a safe PR context that prefers webhook payload data (captured at trigger time)
@@ -265,7 +265,7 @@ async function handlePullRequest(event, owner, repo, config) {
   reviewContent = prMeta.cleanContent;
 
   // Parse findings for inline comments (use full PR diff for line positioning)
-  const { inlineComments, reviewBody } = buildInlineComments(reviewContent, fullDiff);
+  const { inlineComments, reviewBody } = buildInlineComments(reviewContent, fullDiff, { includeNitpicks: config.includeNitpicks });
   let body = formatReviewBody(reviewBody, headSha, config.model);
 
   // Try with inline comments, fall back to body-only if GitHub rejects them
@@ -491,8 +491,9 @@ async function detectLearning(event, owner, repo, config) {
 
 // ===== Helpers =====
 
-function buildInlineComments(reviewContent, diff) {
+function buildInlineComments(reviewContent, diff, { includeNitpicks = false } = {}) {
   const parsed = parseFindings(reviewContent);
+  parsed.findings = filterGenericFindings(parsed.findings, { includeNitpicks });
   if (parsed.findings.length === 0) {
     return { inlineComments: [], reviewBody: reviewContent };
   }

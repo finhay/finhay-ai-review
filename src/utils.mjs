@@ -137,6 +137,47 @@ export function extractPRMetadata(reviewContent) {
   }
 }
 
+const GENERIC_FINDING_PATTERNS = [
+  /missing\s+(file\s+)?newline|trailing\s+newline|no\s+newline\s+at\s+end\s+of\s+file/i,
+  /no\s+test\s+coverage|thiếu\s+(unit\s+)?test|missing\s+unit\s+test|consider\s+adding\s+tests/i,
+  /generic\s+security\s+(hardening|advice)|consider\s+adding\s+logging/i,
+];
+
+/**
+ * Drop or demote findings that match patterns a linter/formatter or
+ * boilerplate-advice filter would already catch. The system prompt already
+ * asks the model to avoid these, but it doesn't always listen.
+ *
+ * Only drops when the finding has no specific file:line anchor — generic
+ * advice without a target. When includeNitpicks is true, demotes the
+ * severity to 🔵/Nitpick instead of dropping.
+ */
+export function filterGenericFindings(findings, { includeNitpicks = false } = {}) {
+  const out = [];
+  for (const finding of findings) {
+    const haystack = `${finding.title || ''}\n${finding.body || ''}`;
+    const matches = GENERIC_FINDING_PATTERNS.some(p => p.test(haystack));
+    if (!matches) {
+      out.push(finding);
+      continue;
+    }
+    // Has a real file:line anchor — keep, the prose may still be useful.
+    if (finding.file && finding.line) {
+      out.push(finding);
+      continue;
+    }
+    if (includeNitpicks) {
+      const demoted = { ...finding, severity: '🔵', severityLabel: 'Nitpick' };
+      demoted.raw = finding.raw
+        .replace(/^🔴|^🟠|^🟡/, '🔵')
+        .replace(/\*\*(Critical|Major|Minor)\s*—/, '**Nitpick —');
+      out.push(demoted);
+    }
+    // otherwise drop entirely
+  }
+  return out;
+}
+
 /**
  * Reconcile a finding's file path against the set of files actually in the
  * current diff. Returns `{ file, raw }` with potentially updated values.

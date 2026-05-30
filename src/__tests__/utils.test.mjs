@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitize, hasMeaningfulContent, reconcilePath } from '../utils.mjs';
+import { sanitize, hasMeaningfulContent, reconcilePath, filterGenericFindings } from '../utils.mjs';
 
 describe('sanitize', () => {
   it('strips HTML comments', () => {
@@ -184,5 +184,53 @@ describe('reconcilePath', () => {
     assert.equal(result.file, null);
     assert.equal(result.raw, '\uD83D\uDFE1 generic note');
     assert.equal(result.dropped, false);
+  });
+});
+
+describe('filterGenericFindings', () => {
+  it('drops generic "missing newline" finding with no file anchor', () => {
+    const findings = [{
+      severity: '\uD83D\uDFE0', severityLabel: 'Major', title: 'Missing file newline',
+      file: null, line: null, body: 'File should end with newline.', raw: '\uD83D\uDFE0 **Major \u2014 Missing file newline**',
+    }];
+    const result = filterGenericFindings(findings, { includeNitpicks: false });
+    assert.equal(result.length, 0);
+  });
+
+  it('drops generic "No test coverage" finding with no anchor', () => {
+    const findings = [{
+      severity: '\uD83D\uDFE0', severityLabel: 'Major', title: 'No test coverage',
+      file: null, line: null, body: 'Consider adding tests.', raw: '\uD83D\uDFE0 **Major \u2014 No test coverage**',
+    }];
+    assert.equal(filterGenericFindings(findings).length, 0);
+  });
+
+  it('keeps test-coverage finding when it has a specific file:line anchor', () => {
+    const findings = [{
+      severity: '\uD83D\uDFE0', severityLabel: 'Major', title: 'Missing unit test for auth flow',
+      file: 'src/auth.ts', line: 42, body: 'critical path uncovered.', raw: '...',
+    }];
+    assert.equal(filterGenericFindings(findings).length, 1);
+  });
+
+  it('keeps unrelated findings', () => {
+    const findings = [{
+      severity: '\uD83D\uDD34', severityLabel: 'Critical', title: 'SQL injection',
+      file: 'src/db.ts', line: 10, body: 'concat raw input.', raw: '...',
+    }];
+    assert.equal(filterGenericFindings(findings).length, 1);
+  });
+
+  it('demotes to Nitpick when includeNitpicks is true', () => {
+    const findings = [{
+      severity: '\uD83D\uDFE0', severityLabel: 'Major', title: 'Missing newline',
+      file: null, line: null, body: 'add newline', raw: '\uD83D\uDFE0 **Major \u2014 Missing newline**',
+    }];
+    const result = filterGenericFindings(findings, { includeNitpicks: true });
+    assert.equal(result.length, 1);
+    assert.equal(result[0].severity, '\uD83D\uDD35');
+    assert.equal(result[0].severityLabel, 'Nitpick');
+    assert.ok(result[0].raw.startsWith('\uD83D\uDD35'));
+    assert.ok(result[0].raw.includes('**Nitpick \u2014'));
   });
 });
