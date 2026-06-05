@@ -94,13 +94,21 @@ export function estimateTokens(text) {
  */
 export function sanitizeModelOutput(text) {
   if (!text) return '';
-  return text
+  let out = text
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
     .replace(/<think>[\s\S]*$/i, '')
     .replace(/\[TOOL_CALL\][\s\S]*?\[\/TOOL_CALL\]/g, '')
     .replace(/^\s*\[TOOL_CALL\][\s\S]*?(?=\n{2}|$)/gm, '')
     .replace(/<team_conventions>[\s\S]*?<\/team_conventions>/gi, '')
     .replace(/<team_learnings>[\s\S]*?<\/team_learnings>/gi, '')
+    // Hallucinated tool-call envelopes: <file_contents>, <read_file>, <tool_call>, <function_calls>, <invoke>.
+    // The model has no tools — these mean it was about to dump output and got cut off.
+    .replace(/<(file_contents|read_file|tool_call|function_calls|invoke|antml:function_calls|antml:invoke)\b[\s\S]*?<\/\1>/gi, '')
+    // Unterminated variants (truncated mid-stream) — drop from the opening tag to end.
+    .replace(/<(file_contents|read_file|tool_call|function_calls|invoke|antml:function_calls|antml:invoke)\b[\s\S]*$/i, '')
+    // Trailing "Let me read…/I need to see…" stubs that lead into the hallucinated XML.
+    .replace(/\n+(?:Let me (?:read|examine|see|check)[^\n]*|I (?:need|want) to (?:read|see|examine|check)[^\n]*)\.?\s*$/i, '');
+  return out
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }

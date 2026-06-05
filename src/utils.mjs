@@ -223,14 +223,23 @@ export function reconcilePath(finding, diffFiles) {
 
 /**
  * Heuristic: did the LLM actually produce a meaningful review?
- * Returns false for near-empty or template-only output (e.g. when the model
- * was handed a diff that consisted entirely of filtered files).
+ * Returns false for:
+ *  - near-empty / metadata-only output
+ *  - free-form narration that skipped the prescribed `### Tóm tắt / ### Findings
+ *    / ### ✅ Điểm tốt` skeleton (e.g. `## Analysis` followed by per-file `### 1. file`)
+ *  - mid-stream cutoffs that produced no actual findings
+ *
+ * Accept only when the text contains at least one of:
+ *  - a prescribed section heading
+ *  - a finding line that starts with a severity emoji
  */
 export function hasMeaningfulContent(text) {
   if (!text) return false;
   const stripped = text.replace(/<!--[\s\S]*?-->/g, '').trim();
   if (stripped.length < 80) return false;
-  return /###|🔴|🟠|🟡|🔵/.test(stripped);
+  const hasPrescribedSection = /^###\s*(?:Tóm tắt|Findings|✅\s*Điểm tốt|PR Metadata)\b/m.test(stripped);
+  const hasSeverityFinding = /^(?:🔴|🟠|🟡|🔵)\s/m.test(stripped);
+  return hasPrescribedSection || hasSeverityFinding;
 }
 
 /**

@@ -58,4 +58,69 @@ describe('sanitizeModelOutput', () => {
     const input = '## Review\n\nFindings...\n';
     assert.equal(sanitizeModelOutput(input), '## Review\n\nFindings...');
   });
+
+  it('strips a closed <file_contents> envelope', () => {
+    const input = '### Findings\n\nbody\n\n<file_contents>\n<path>src/foo.ts</path>\n</file_contents>';
+    const out = sanitizeModelOutput(input);
+    assert.ok(!out.includes('<file_contents>'));
+    assert.ok(!out.includes('<path>'));
+    assert.ok(out.includes('### Findings'));
+  });
+
+  it('strips an unterminated <file_contents> envelope (mid-stream cutoff)', () => {
+    const input = '### Findings\n\nbody\n\n<file_contents>\n<path>src/foo.ts</path>\n';
+    const out = sanitizeModelOutput(input);
+    assert.ok(!out.includes('<file_contents>'));
+    assert.ok(!out.includes('<path>'));
+    assert.ok(out.includes('### Findings'));
+  });
+
+  it('strips multiple <file_contents> envelopes back-to-back', () => {
+    const input = '<file_contents>\n<path>a</path>\n</file_contents>\n<file_contents>\n<path>b</path>\n</file_contents>\n\nactual';
+    assert.equal(sanitizeModelOutput(input), 'actual');
+  });
+
+  it('strips <tool_call> and <function_calls> envelopes', () => {
+    assert.equal(
+      sanitizeModelOutput('<tool_call>\nread foo.ts\n</tool_call>\n\nreview body'),
+      'review body'
+    );
+    assert.equal(
+      sanitizeModelOutput('<function_calls>\n<invoke name="Read">x</invoke>\n</function_calls>\n\nreview body'),
+      'review body'
+    );
+  });
+
+  it('strips trailing "Let me read…" stubs that lead into hallucinated XML', () => {
+    const input = '### 3. wifeed-vn-agri.collector.ts\n\nLet me examine this file carefully.';
+    const out = sanitizeModelOutput(input);
+    assert.ok(!out.includes('Let me examine'));
+    assert.ok(out.includes('### 3.'));
+  });
+
+  it('strips the real broken-review shape from PR #372 (second comment)', () => {
+    // Reproduces the actual broken output: prose ends with "I need to see..." then hallucinated tags.
+    const input = `## Analysis
+
+### 1. file.ts
+
+body
+
+---
+
+I need to see the full content of the new collector and modified files to give an accurate review. Let me read the relevant files.
+
+<file_contents>
+<path>apps/api/src/collectors/commodities/wifeed-vn-agri.collector.ts</path>
+</file_contents>
+<file_contents>
+<path>apps/api/src/collectors/commodities/wifeed-vn-commodities.collector.ts</path>
+</file_contents>`;
+    const out = sanitizeModelOutput(input);
+    assert.ok(!out.includes('<file_contents>'));
+    assert.ok(!out.includes('<path>'));
+    assert.ok(!out.includes('I need to see'));
+    assert.ok(!out.includes('Let me read'));
+    assert.ok(out.includes('## Analysis'));
+  });
 });

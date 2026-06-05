@@ -103,6 +103,27 @@ describe('systemPrompt incremental mode', () => {
   });
 });
 
+describe('systemPrompt tool-call drift guards', () => {
+  it('forbids tool-call markers and file-fetch envelopes', () => {
+    const result = systemPrompt({ language: 'vi', reviewLevel: 'standard', conventions: '', learnings: [], includeNitpicks: false });
+    assert.ok(result.includes('<file_contents>'));
+    assert.ok(result.includes('[TOOL_CALL]'));
+    assert.ok(/Let me read|I need to see/.test(result));
+    assert.ok(/no tools|NO tools/i.test(result));
+  });
+
+  it('forbids free-form section headers like ## Analysis or per-file ###', () => {
+    const result = systemPrompt({ language: 'vi', reviewLevel: 'standard', conventions: '', learnings: [], includeNitpicks: false });
+    assert.ok(result.includes('## Analysis'));
+    assert.ok(/three prescribed/.test(result));
+  });
+
+  it('tells the reviewer to drop self-refuting findings instead of explaining them away', () => {
+    const result = systemPrompt({ language: 'vi', reviewLevel: 'standard', conventions: '', learnings: [], includeNitpicks: false });
+    assert.ok(/talk yourself out of|non-issue|delete the finding/i.test(result));
+  });
+});
+
 describe('systemPrompt autoFixMetadata gate', () => {
   it('includes PR Title & Description Auto-fix block by default', () => {
     const result = systemPrompt({ language: 'vi', reviewLevel: 'standard', conventions: '', learnings: [], includeNitpicks: false });

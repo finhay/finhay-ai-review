@@ -134,6 +134,55 @@ describe('hasMeaningfulContent', () => {
     const text = '<!-- finhay-review-meta: {"sha":"abc"} -->\n## \uD83D\uDD0D AI Code Review\n\n';
     assert.equal(hasMeaningfulContent(text), false);
   });
+
+  it('rejects free-form `## Analysis` reviews that skipped the prescribed sections', () => {
+    // The broken second comment on PR #372: long enough, has `### 1.` headers and `---`,
+    // but no `### T\u00F3m t\u1EAFt`/`### Findings`/`### \u2705 \u0110i\u1EC3m t\u1ED1t`
+    // and no leading-severity-emoji finding line.
+    const text = `## Analysis
+
+Let me examine each changed file in detail.
+
+---
+
+### 1. wifeed-commodity.constants.ts
+
+\uD83D\uDFE2 Addition of Black Pepper \u2014 the field name and unit (VND/kg) look correct.
+
+No issues here.
+
+---
+
+### 2. wifeed-vn-commodities.collector.ts
+
+This collector now fetches from the domestic VN endpoint instead of the international endpoint.
+
+---
+
+### 3. wifeed-vn-agri.collector.ts
+
+body text here that makes it long enough to pass the length floor easily.`;
+    assert.equal(hasMeaningfulContent(text), false);
+  });
+
+  it('accepts a review with at least one prescribed section header', () => {
+    const text = '### Findings\n\n\uD83D\uDFE0 **Major \u2014 Bug** \u2014 `src/x.ts:1`\n\nThe caller can dereference a null value here and crash the request pipeline.';
+    assert.equal(hasMeaningfulContent(text), true);
+  });
+
+  it('accepts a review whose finding line starts with a severity emoji', () => {
+    const text = `Some intro prose long enough to exceed the eighty char length floor on its own.
+
+\uD83D\uDFE0 **Major \u2014 Null deref** \u2014 \`src/x.ts:10\`
+
+caller may crash.`;
+    assert.equal(hasMeaningfulContent(text), true);
+  });
+
+  it('rejects a review with a mid-line emoji but no real finding header', () => {
+    const text = 'A long narrative paragraph that mentions \uD83D\uDFE0 inline like an example but is not actually a finding header. '.repeat(2);
+    assert.equal(hasMeaningfulContent(text), false);
+  });
 });
 
 describe('reconcilePath', () => {
