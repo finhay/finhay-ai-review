@@ -128,7 +128,7 @@ if (!order) throw new OrderNotFoundError(id);
   return prompt;
 }
 
-export function reviewPrompt({ prTitle, prDescription, diff, isIncremental, fileManifest, previousReviewSummary }) {
+export function reviewPrompt({ prTitle, prDescription, diff, isIncremental, fileManifest, previousReviewSummary, fullPRDiff }) {
   const mode = isIncremental
     ? 'This is an INCREMENTAL review — only review the NEW changes below. Do not repeat findings from previous reviews unless the issue still exists in the new code.'
     : 'This is a FULL review of the entire PR.';
@@ -141,6 +141,13 @@ export function reviewPrompt({ prTitle, prDescription, diff, isIncremental, file
 
   if (fileManifest) {
     prompt += `\n\n<changed_files>\n${fileManifest}\n</changed_files>`;
+  }
+
+  if (fullPRDiff && isIncremental) {
+    prompt += `\n\nBelow is the FULL PR diff (base → HEAD) for reference. Use it to understand the complete scope of the PR — e.g. whether a symbol was introduced in an earlier commit of this PR vs pre-existing in the codebase. Do NOT review code in this section; only review the NEW changes in <code_diff>.
+<full_pr_diff>
+${fullPRDiff}
+</full_pr_diff>`;
   }
 
   if (previousReviewSummary) {

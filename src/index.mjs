@@ -226,6 +226,7 @@ async function handlePullRequest(event, owner, repo, config) {
           isIncremental,
           fileManifest,
           previousReviewSummary,
+          fullPRDiff: isIncremental ? truncate(fullDiff, 30000) : undefined,
         });
         try {
           const res = await chat(
@@ -250,6 +251,7 @@ async function handlePullRequest(event, owner, repo, config) {
       isIncremental,
       fileManifest,
       previousReviewSummary,
+      fullPRDiff: isIncremental ? truncate(fullDiff, 30000) : undefined,
     });
     const res = await chat(
       [{ role: 'system', content: sysPrompt }, { role: 'user', content: userMsg }],
