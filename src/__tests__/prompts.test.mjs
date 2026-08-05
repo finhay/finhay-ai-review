@@ -115,12 +115,68 @@ describe('systemPrompt tool-call drift guards', () => {
   it('forbids free-form section headers like ## Analysis or per-file ###', () => {
     const result = systemPrompt({ language: 'vi', reviewLevel: 'standard', conventions: '', learnings: [], includeNitpicks: false });
     assert.ok(result.includes('## Analysis'));
-    assert.ok(/three prescribed/.test(result));
+    assert.ok(/prescribed `###` sections/.test(result));
   });
 
   it('tells the reviewer to drop self-refuting findings instead of explaining them away', () => {
     const result = systemPrompt({ language: 'vi', reviewLevel: 'standard', conventions: '', learnings: [], includeNitpicks: false });
     assert.ok(/talk yourself out of|non-issue|delete the finding/i.test(result));
+  });
+});
+
+describe('systemPrompt evidence gate (false-positive guards)', () => {
+  const build = (over = {}) => systemPrompt({
+    language: 'vi', reviewLevel: 'standard', conventions: '', learnings: [], includeNitpicks: false, ...over,
+  });
+
+  it('requires every finding to name a sink and a concrete failure', () => {
+    const result = build();
+    assert.ok(result.includes('Evidence Gate'));
+    assert.ok(/Name the sink/.test(result));
+  });
+
+  it('caps unverifiable findings below Major and routes them to Cần verify', () => {
+    const result = build();
+    assert.ok(/NEVER be 🔴 Critical or 🟠 Major/.test(result));
+    assert.ok(result.includes('### Cần verify'));
+  });
+
+  it('states that removing a pure super.foo() delegation is not a regression', () => {
+    const result = build();
+    assert.ok(/return `?super\.foo/.test(result));
+    assert.ok(/Deleted code is not automatically a regression/.test(result));
+  });
+
+  it('scopes path traversal away from flat key-value keyspaces', () => {
+    const result = build();
+    assert.ok(/Path traversal/.test(result));
+    assert.ok(/Redis, Memcached, DynamoDB keys/.test(result));
+    assert.ok(/hard-coded literal in the source cannot be escaped/.test(result));
+  });
+
+  it('warns about reading the diff backwards', () => {
+    const result = build();
+    assert.ok(/`-` lines are the OLD code/.test(result));
+    assert.ok(/read the diff backwards/.test(result));
+  });
+
+  it('forbids reporting findings the model itself says need no action', () => {
+    const result = build();
+    assert.ok(/không cần fix/.test(result));
+    assert.ok(/nobody should act on is noise/.test(result));
+  });
+
+  it('blocks hedged wording from carrying a Major label', () => {
+    const result = build();
+    assert.ok(/load-bearing in your explanation, it is NOT Major/.test(result));
+    assert.ok(result.includes('Finding Self-Check'));
+  });
+
+  it('lists high-value bug classes including single-use/idempotency', () => {
+    const result = build();
+    assert.ok(result.includes('High-Value Checks'));
+    assert.ok(/Single-use \/ idempotency/.test(result));
+    assert.ok(/Money & precision/.test(result));
   });
 });
 
