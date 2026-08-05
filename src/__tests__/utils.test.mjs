@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitize, hasMeaningfulContent, reconcilePath, filterGenericFindings, isMergeCommitPush } from '../utils.mjs';
+import { sanitize, hasMeaningfulContent, reconcilePath, filterGenericFindings, isMergeCommitPush, parseFindings } from '../utils.mjs';
 
 describe('sanitize', () => {
   it('strips HTML comments', () => {
@@ -316,5 +316,46 @@ describe('isMergeCommitPush', () => {
 
   it('returns false when parents array is missing', () => {
     assert.equal(isMergeCommitPush({ message: 'Merge ...' }), false);
+  });
+});
+
+describe('parseFindings section boundaries', () => {
+  const review = [
+    '### Tóm tắt',
+    'Sửa luồng login.',
+    '',
+    '### Findings',
+    '🟠 **Major — One-time code burned twice** — `app/page.tsx:41`',
+    '',
+    'Trigger: StrictMode chạy effect 2 lần.',
+    '',
+    '### Cần verify',
+    '❓ `auth.controller.ts:420` — GETDEL cần Redis >= 6.2, không thấy trong diff.',
+    '',
+    '### ✅ Điểm tốt',
+    '- Comment giải thích root cause rất rõ.',
+    '',
+  ].join('\n');
+
+  it('does not absorb the Cần verify section into the last finding', () => {
+    const { findings } = parseFindings(review);
+    assert.equal(findings.length, 1);
+    assert.ok(!findings[0].body.includes('Cần verify'));
+    assert.ok(!findings[0].body.includes('GETDEL'));
+    assert.equal(findings[0].line, 41);
+  });
+
+  it('still parses summary and positives around the new section', () => {
+    const { summary, positives } = parseFindings(review);
+    assert.equal(summary, 'Sửa luồng login.');
+    assert.ok(positives.includes('root cause'));
+  });
+
+  it('still works when Cần verify is omitted', () => {
+    const without = review.replace(/### Cần verify\n[\s\S]*?\n\n/, '');
+    const { findings, positives } = parseFindings(without);
+    assert.equal(findings.length, 1);
+    assert.ok(!findings[0].body.includes('Điểm tốt'));
+    assert.ok(positives.includes('root cause'));
   });
 });

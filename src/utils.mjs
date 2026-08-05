@@ -237,7 +237,7 @@ export function hasMeaningfulContent(text) {
   if (!text) return false;
   const stripped = text.replace(/<!--[\s\S]*?-->/g, '').trim();
   if (stripped.length < 80) return false;
-  const hasPrescribedSection = /^###\s*(?:Tóm tắt|Findings|✅\s*Điểm tốt|PR Metadata)\b/m.test(stripped);
+  const hasPrescribedSection = /^###\s*(?:Tóm tắt|Findings|Cần verify|✅\s*Điểm tốt|PR Metadata)\b/m.test(stripped);
   const hasSeverityFinding = /^(?:🔴|🟠|🟡|🔵)\s/m.test(stripped);
   return hasPrescribedSection || hasSeverityFinding;
 }
@@ -255,7 +255,10 @@ export function parseFindings(reviewContent) {
   const positivesMatch = reviewContent.match(/###\s*✅\s*Điểm tốt\n([\s\S]*?)(?=###|$)/);
   if (positivesMatch) result.positives = positivesMatch[1].trim();
 
-  const findingsMatch = reviewContent.match(/###\s*Findings\n([\s\S]*?)(?=###\s*✅|$)/);
+  // Stop at the next `###` header of any kind, not just `### ✅`. `### Cần verify`
+  // sits between Findings and Điểm tốt, and anchoring only on ✅ would append that
+  // whole section to the body of the last finding — and post it as an inline comment.
+  const findingsMatch = reviewContent.match(/###\s*Findings\n([\s\S]*?)(?=^###\s|$)/m);
   if (!findingsMatch) return result;
 
   const findingBlocks = findingsMatch[1].split(/(?=^(?:🔴|🟠|🟡|🔵))/m);

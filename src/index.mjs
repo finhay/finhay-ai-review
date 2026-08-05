@@ -11,6 +11,12 @@ import { loadLearnings, filterLearnings, learningConfirmationMessage } from './l
 import { parseCommand, isPaused } from './commands.mjs';
 import { getInput, parseRepo, readEventPayload, countDiffLines, truncate, sanitize, parseDiffMap, parseFindings, extractPRMetadata, hasMeaningfulContent, reconcilePath, filterGenericFindings, isMergeCommitPush } from './utils.mjs';
 
+// Reviews carry a summary, findings with suggestion blocks, and a trailing
+// pr-metadata JSON block — the 4096 default truncated them mid-finding, which
+// also strands the metadata block and silently disables the title/description
+// auto-fix.
+const REVIEW_MAX_TOKENS = 8192;
+
 /**
  * Build a safe PR context that prefers webhook payload data (captured at trigger time)
  * over fetched data, preventing TOCTOU attacks where attackers edit PR content
@@ -231,7 +237,7 @@ async function handlePullRequest(event, owner, repo, config) {
         try {
           const res = await chat(
             [{ role: 'system', content: sysPrompt }, { role: 'user', content: userMsg }],
-            { apiBase: config.apiBase, apiKey: config.apiKey, model: config.model }
+            { apiBase: config.apiBase, apiKey: config.apiKey, model: config.model, maxTokens: REVIEW_MAX_TOKENS }
           );
           results[i + j] = `#### ${chunk.filename}\n${res.content}`;
         } catch (err) {
@@ -255,7 +261,7 @@ async function handlePullRequest(event, owner, repo, config) {
     });
     const res = await chat(
       [{ role: 'system', content: sysPrompt }, { role: 'user', content: userMsg }],
-      { apiBase: config.apiBase, apiKey: config.apiKey, model: config.model }
+      { apiBase: config.apiBase, apiKey: config.apiKey, model: config.model, maxTokens: REVIEW_MAX_TOKENS }
     );
     reviewContent = res.content;
     console.log(`Tokens: ${JSON.stringify(res.usage)}`);
