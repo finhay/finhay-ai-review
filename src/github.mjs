@@ -11,9 +11,32 @@ export function init(token, apiBase = 'https://api.github.com') {
   _botLogin = null;
 }
 
+// Markers we stamp on everything we post. GitHub App installation tokens cannot
+// call `GET /user` (403 "Resource not accessible by integration"), so getBotLogin
+// silently falls back to `github-actions[bot]` and never matches `<app>[bot]`.
+// Content matching is the reliable identity check under an App token.
+const OWN_CONTENT_MARKERS = [
+  '<!-- finhay-review-meta:',
+  '## 🔍 AI Code Review',
+  '## 🤖 Finhay Review — Commands',
+  '⏸️ Auto review **paused**',
+  '▶️ Auto review **resumed**',
+];
+
+/** True if `body` was written by this action. */
+export function isOwnContent(body) {
+  return OWN_CONTENT_MARKERS.some(marker => (body || '').includes(marker));
+}
+
+/** True for any bot account — used to avoid replying to (and looping on) bot comments. */
+export function isBotUser(user) {
+  return user?.type === 'Bot' || /\[bot\]$/.test(user?.login || '');
+}
+
 /**
  * Get the authenticated bot login (cached after first call).
- * Works with both GITHUB_TOKEN (github-actions[bot]) and GitHub App tokens (app-name[bot]).
+ * Works with GITHUB_TOKEN (github-actions[bot]); GitHub App installation tokens
+ * cannot read /user, so this falls back — pair it with isBotUser/isOwnContent.
  */
 export async function getBotLogin() {
   if (_botLogin) return _botLogin;
@@ -169,7 +192,11 @@ async function fetchBotItems(apiPath, botLogin) {
   const res = await ghFetch(`${apiPath}?per_page=100`);
   if (!res.ok) return [];
   const items = await res.json();
-  return items.filter(item => item.user?.login === botLogin);
+  // Login match covers GITHUB_TOKEN; marker match covers App tokens whose login
+  // we can't resolve. Without the fallback these return [] and the caller loses
+  // pause state and the last-reviewed SHA.
+  return items.filter(item =>
+    item.user?.login === botLogin || (isBotUser(item.user) && isOwnContent(item.body)));
 }
 
 export async function getBotReviews(owner, repo, prNumber, botLogin) {

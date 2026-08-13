@@ -313,8 +313,10 @@ async function handleIssueComment(event, owner, repo, config) {
   const comment = event.comment;
   const issue = event.issue;
 
-  // Skip bot's own comments
-  if (comment.user.login === await gh.getBotLogin()) return;
+  // Skip bot-authored comments. Our own help text lists the trigger word, so a
+  // login check that misses (App tokens can't read /user) makes the bot answer
+  // itself — and each self-reply spawns a run that cancels the real one.
+  if (gh.isBotUser(comment.user)) return;
 
   // Only handle PR comments (issues have no pull_request key)
   if (!issue.pull_request) return;
@@ -410,7 +412,7 @@ async function handleIssueComment(event, owner, repo, config) {
 // ===== Review comment reply (inline code comment) =====
 async function handleReviewComment(event, owner, repo, config) {
   const comment = event.comment;
-  if (comment.user.login === await gh.getBotLogin()) return;
+  if (gh.isBotUser(comment.user)) return;
 
   const cmd = parseCommand(comment.body, config.triggerWord);
   if (!cmd) {
@@ -480,7 +482,9 @@ async function detectLearning(event, owner, repo, config) {
 
   // Fetch the parent comment to get the actual bot review text
   const parentComment = await gh.getReviewComment(owner, repo, comment.in_reply_to_id);
-  if (!parentComment || parentComment.user?.login !== await gh.getBotLogin()) return;
+  // Parent must be a bot review comment — under an App token the login lookup
+  // can't confirm which bot, so bot-authored is the strongest check available.
+  if (!parentComment || !gh.isBotUser(parentComment.user)) return;
 
   const prompt = learningDetectionPrompt({
     botComment: parentComment.body,
