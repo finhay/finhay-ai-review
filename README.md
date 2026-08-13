@@ -63,7 +63,10 @@ permissions:
   issues: write
 
 concurrency:
-  group: ai-review-${{ github.event.pull_request.number || github.event.issue.number }}
+  # Pushes to the same PR supersede each other, but every comment gets its own
+  # group: concurrency is evaluated before the job `if`, so a comment run that
+  # ends up skipped would still cancel a review that is mid-flight.
+  group: ai-review-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event.comment.id || 'push' }}
   cancel-in-progress: true
 
 jobs:
@@ -71,8 +74,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     if: |
-      github.event_name == 'pull_request' ||
-      contains(github.event.comment.body, '@finhay-review')
+      github.event_name == 'pull_request' || (
+        github.event.comment.user.type != 'Bot' &&
+        contains(github.event.comment.body, '@finhay-review')
+      )
     steps:
       - uses: actions/checkout@v4
 
