@@ -242,6 +242,21 @@ export function hasMeaningfulContent(text) {
   return hasPrescribedSection || hasSeverityFinding;
 }
 
+// Batched reviews repeat boilerplate ("Không có vấn đề nghiêm trọng") across
+// sections — keep each distinct line once, in order.
+function dedupeLines(sections) {
+  const seen = new Set();
+  const kept = [];
+  for (const line of sections.join('\n').split('\n')) {
+    const key = line.trim();
+    if (!key) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.push(key);
+  }
+  return kept;
+}
+
 /**
  * Parse review markdown into structured findings for inline comments.
  * Returns { summary, findings: [{ severity, severityLabel, title, file, line, body, raw }], positives }
@@ -249,19 +264,22 @@ export function hasMeaningfulContent(text) {
 export function parseFindings(reviewContent) {
   const result = { summary: '', findings: [], positives: '' };
 
-  const summaryMatch = reviewContent.match(/###\s*Tóm tắt\n([\s\S]*?)(?=###|$)/);
-  if (summaryMatch) result.summary = summaryMatch[1].trim();
+  // A large PR is reviewed in batches whose responses are concatenated, so every
+  // section can appear more than once. Matching only the first one dropped every
+  // finding after the first batch.
+  const sections = (pattern) =>
+    [...reviewContent.matchAll(pattern)].map(m => m[1].trim()).filter(Boolean);
 
-  const positivesMatch = reviewContent.match(/###\s*✅\s*Điểm tốt\n([\s\S]*?)(?=###|$)/);
-  if (positivesMatch) result.positives = positivesMatch[1].trim();
+  result.summary = dedupeLines(sections(/###\s*Tóm tắt\n([\s\S]*?)(?=^###\s|$)/gm)).join('\n');
+  result.positives = dedupeLines(sections(/###\s*✅\s*Điểm tốt\n([\s\S]*?)(?=^###\s|$)/gm)).join('\n');
 
   // Stop at the next `###` header of any kind, not just `### ✅`. `### Cần verify`
   // sits between Findings and Điểm tốt, and anchoring only on ✅ would append that
   // whole section to the body of the last finding — and post it as an inline comment.
-  const findingsMatch = reviewContent.match(/###\s*Findings\n([\s\S]*?)(?=^###\s|$)/m);
-  if (!findingsMatch) return result;
+  const findingsSections = sections(/###\s*Findings\n([\s\S]*?)(?=^###\s|$)/gm);
+  if (findingsSections.length === 0) return result;
 
-  const findingBlocks = findingsMatch[1].split(/(?=^(?:🔴|🟠|🟡|🔵))/m);
+  const findingBlocks = findingsSections.flatMap(s => s.split(/(?=^(?:🔴|🟠|🟡|🔵))/m));
 
   for (const block of findingBlocks) {
     const trimmed = block.trim();

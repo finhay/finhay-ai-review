@@ -359,3 +359,55 @@ describe('parseFindings section boundaries', () => {
     assert.ok(positives.includes('root cause'));
   });
 });
+
+describe('parseFindings across batched reviews', () => {
+  // A large PR is reviewed in batches; the responses are concatenated with ---.
+  const batched = [
+    '#### app/page.tsx',
+    '### Tóm tắt',
+    'Sửa luồng login.',
+    '',
+    '### Findings',
+    '🟠 **Major — One-time code burned twice** — `app/page.tsx:41`',
+    '',
+    'Trigger: StrictMode chạy effect 2 lần.',
+    '',
+    '---',
+    '',
+    '#### src/order/service.ts +3 file(s)',
+    '### Tóm tắt',
+    'Thêm validate order.',
+    '',
+    '### Findings',
+    '🔴 **Critical — Missing null check** — `src/order/service.ts:42`',
+    '',
+    'order có thể undefined.',
+    '',
+    '### ✅ Điểm tốt',
+    '- Tách service rõ ràng.',
+    '',
+  ].join('\n');
+
+  it('collects findings from every batch, not just the first', () => {
+    const { findings } = parseFindings(batched);
+    assert.equal(findings.length, 2);
+    assert.deepEqual(findings.map(f => f.file), ['app/page.tsx', 'src/order/service.ts']);
+    assert.deepEqual(findings.map(f => f.line), [41, 42]);
+  });
+
+  it('merges summaries from every batch', () => {
+    const { summary, positives } = parseFindings(batched);
+    assert.ok(summary.includes('Sửa luồng login.'));
+    assert.ok(summary.includes('Thêm validate order.'));
+    assert.ok(positives.includes('Tách service rõ ràng.'));
+  });
+
+  it('drops repeated boilerplate lines when merging', () => {
+    const repeated = [
+      '### Tóm tắt', 'Không có vấn đề nghiêm trọng.', '',
+      '---', '',
+      '### Tóm tắt', 'Không có vấn đề nghiêm trọng.', '',
+    ].join('\n');
+    assert.equal(parseFindings(repeated).summary, 'Không có vấn đề nghiêm trọng.');
+  });
+});
