@@ -411,3 +411,31 @@ describe('parseFindings across batched reviews', () => {
     assert.equal(parseFindings(repeated).summary, 'Không có vấn đề nghiêm trọng.');
   });
 });
+
+describe('filterGenericFindings drops empty-batch prose', () => {
+  it('drops a "no findings" block with no file:line anchor', () => {
+    const findings = [{
+      severity: '🟡', severityLabel: '', title: '', file: null, line: null,
+      body: 'Không có findings nào đạt mức 🔴/🟠/🟡 trong phạm vi diff được cung cấp.',
+      raw: 'Không có findings nào đạt mức 🔴/🟠/🟡 trong phạm vi diff được cung cấp.',
+    }];
+    assert.equal(filterGenericFindings(findings).length, 0);
+  });
+
+  it('drops the English variant too', () => {
+    const findings = [{
+      severity: '🟡', severityLabel: '', title: '', file: null, line: null,
+      body: 'No issues found in the provided diff.', raw: 'No issues found in the provided diff.',
+    }];
+    assert.equal(filterGenericFindings(findings).length, 0);
+  });
+
+  it('keeps a real finding that happens to mention no other issues', () => {
+    const findings = [{
+      severity: '🟠', severityLabel: 'Major', title: 'Null deref', file: 'a.ts', line: 12,
+      body: 'Không có vấn đề nào khác, nhưng dòng này crash khi order undefined.',
+      raw: '🟠 **Major — Null deref** — `a.ts:12`',
+    }];
+    assert.equal(filterGenericFindings(findings).length, 1);
+  });
+});

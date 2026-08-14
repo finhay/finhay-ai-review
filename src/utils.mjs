@@ -153,6 +153,9 @@ const GENERIC_FINDING_PATTERNS = [
   /missing\s+(file\s+)?newline|trailing\s+newline|no\s+newline\s+at\s+end\s+of\s+file/i,
   /no\s+test\s+coverage|thiếu\s+(unit\s+)?test|missing\s+unit\s+test|consider\s+adding\s+tests/i,
   /generic\s+security\s+(hardening|advice)|consider\s+adding\s+logging/i,
+  // "I found nothing here" prose. Batched reviews produce one per batch, and it
+  // lands in the body as a finding because the block carries no severity marker.
+  /không\s+(có|phát\s+hiện)\s+(finding|vấn\s+đề|lỗi)|no\s+(findings|issues)\s+(found|identified)/i,
 ];
 
 /**
