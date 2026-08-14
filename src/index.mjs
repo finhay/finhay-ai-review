@@ -208,15 +208,18 @@ async function handlePullRequest(event, owner, repo, config) {
   // Build prompts. Only ask the model to regenerate the PR title/description
   // on PR open — otherwise we spend tokens every push and risk rewriting an
   // already-good title.
-  const sysPrompt = systemPrompt({
+  const autoFixMetadata = event.action === 'opened';
+  const buildSysPrompt = (overrides = {}) => systemPrompt({
     language: config.language,
     reviewLevel: config.reviewLevel,
     conventions,
     learnings: relevantLearnings,
     includeNitpicks: config.includeNitpicks,
     isIncremental,
-    autoFixMetadata: event.action === 'opened',
+    autoFixMetadata,
+    ...overrides,
   });
+  const sysPrompt = buildSysPrompt();
 
   let reviewContent;
 
@@ -230,6 +233,9 @@ async function handlePullRequest(event, owner, repo, config) {
     const deadline = Date.now() + config.reviewBudgetMs;
     const results = new Array(groups.length);
     let done = 0;
+    // A batch sees a handful of files — far too little to retitle the PR from.
+    // Metadata is derived once at the end, from the whole-PR view.
+    const batchSysPrompt = buildSysPrompt({ autoFixMetadata: false });
 
     for (let i = 0; i < groups.length; i += CONCURRENCY) {
       // Stop issuing work before the job timeout kills us mid-flight — a partial
@@ -250,11 +256,12 @@ async function handlePullRequest(event, owner, repo, config) {
           fileManifest,
           previousReviewSummary,
           fullPRDiff: isIncremental ? truncate(fullDiff, 30000) : undefined,
+          batch: { index: i + j + 1, total: groups.length },
         });
         const label = describeGroup(group);
         try {
           const res = await chat(
-            [{ role: 'system', content: sysPrompt }, { role: 'user', content: userMsg }],
+            [{ role: 'system', content: batchSysPrompt }, { role: 'user', content: userMsg }],
             { apiBase: config.apiBase, apiKey: config.apiKey, model: config.model, maxTokens: REVIEW_MAX_TOKENS }
           );
           results[i + j] = `#### ${label}\n${res.content}`;
@@ -268,6 +275,19 @@ async function handlePullRequest(event, owner, repo, config) {
       console.log(`Reviewed ${done}/${groups.length} batches (${Math.round((Date.now() - (deadline - config.reviewBudgetMs)) / 1000)}s elapsed)`);
     }
     reviewContent = results.filter(Boolean).join('\n\n---\n\n');
+
+    // One summary for the whole PR. Batches are told not to write their own —
+    // each only sees a few files, so merging them produced N paraphrases of the
+    // same paragraph and a PR title rewritten from an arbitrary slice.
+    const overview = await summarizePR({
+      sysPrompt: buildSysPrompt(),
+      prTitle: safeTitle,
+      prDescription: safeBody,
+      files: prFiles,
+      diff,
+      config,
+    });
+    if (overview) reviewContent = `### Tóm tắt\n${overview}\n\n${reviewContent}`;
   } else {
     // Single review
     const userMsg = reviewPrompt({
@@ -393,7 +413,7 @@ async function handleIssueComment(event, owner, repo, config) {
       ]);
       // Use webhook issue data (TOCTOU-safe) for title/body sent to LLM
       const summaryCtx = buildSafeContext(issue, pr);
-      const userMsg = summaryPrompt({ prTitle: sanitize(summaryCtx.title), prDescription: sanitize(summaryCtx.body), files, diff: truncate(summaryDiff, 15000) });
+      const userMsg = summaryPrompt({ prTitle: sanitize(summaryCtx.title), prDescription: sanitize(summaryCtx.body), files, diff: truncate(summaryDiff, 15000), language: config.language });
       const res = await chat(
         [{ role: 'system', content: 'You are a helpful PR summarizer. Write in Vietnamese.' }, { role: 'user', content: userMsg }],
         { apiBase: config.apiBase, apiKey: config.apiKey, model: config.model, temperature: 0.3 }
@@ -605,6 +625,27 @@ async function loadConventions(owner, repo, ref, config) {
     }
   }
   return '';
+}
+
+// Whole-PR overview for a batched review: the manifest plus a truncated diff is
+// a far better basis for the summary (and the PR title/description auto-fix)
+// than any single batch. Never fail the review over it.
+async function summarizePR({ sysPrompt, prTitle, prDescription, files, diff, config }) {
+  try {
+    const res = await chat(
+      [
+        { role: 'system', content: sysPrompt },
+        { role: 'user', content: summaryPrompt({ prTitle, prDescription, files, diff: truncate(diff, 15000), language: config.language }) },
+      ],
+      { apiBase: config.apiBase, apiKey: config.apiKey, model: config.model, temperature: 0.3, maxTokens: REVIEW_MAX_TOKENS }
+    );
+    // The system prompt defines a `### Tóm tắt` section, so the model often
+    // emits the heading despite being asked for bare text — we add our own.
+    return res.content.trim().replace(/^###\s*(Tóm tắt|Summary)\s*\n/i, '').trim();
+  } catch (err) {
+    console.error(`Failed to build PR summary: ${err.message}`);
+    return '';
+  }
 }
 
 // Heading for a packed batch — keep it short, a batch can hold a dozen files.

@@ -170,10 +170,23 @@ useEffect(() => {
   return prompt;
 }
 
-export function reviewPrompt({ prTitle, prDescription, diff, isIncremental, fileManifest, previousReviewSummary, fullPRDiff }) {
-  const mode = isIncremental
+export function reviewPrompt({ prTitle, prDescription, diff, isIncremental, fileManifest, previousReviewSummary, fullPRDiff, batch }) {
+  let mode = isIncremental
     ? 'This is an INCREMENTAL review — only review the NEW changes below. Do not repeat findings from previous reviews unless the issue still exists in the new code.'
     : 'This is a FULL review of the entire PR.';
+
+  // A large PR is reviewed in slices. Without this the model treats the manifest
+  // as the diff's contents and reports the other files as "missing from the diff",
+  // and every slice writes its own whole-PR summary.
+  if (batch) {
+    mode += `
+
+This PR is too large for one request, so it is being reviewed in ${batch.total} parts and you are reviewing part ${batch.index} of ${batch.total}.
+- <code_diff> contains ONLY this part's files. The other files are being reviewed separately, by another request.
+- <changed_files> lists the whole PR for context. Files listed there but absent from <code_diff> are NOT missing or empty — they simply belong to another part. Never say a file has no content in the diff, and never review a file you cannot see.
+- Do NOT write a \`### Tóm tắt\` section. One summary is written separately for the whole PR.
+- If this part contains nothing worth reporting, leave \`### Findings\` empty. Do not write prose explaining that you found nothing.`;
+  }
 
   let prompt = `<pr_title>${prTitle}</pr_title>\n\n${mode}`;
 
@@ -225,7 +238,7 @@ Answer the question based on the code context above. Be specific and helpful.`;
   return prompt;
 }
 
-export function summaryPrompt({ prTitle, prDescription, files, diff }) {
+export function summaryPrompt({ prTitle, prDescription, files, diff, language = 'vi' }) {
   const fileList = files.map(f => `- ${f.filename} (+${f.additions}/-${f.deletions})`).join('\n');
   let prompt = `<pr_title>${prTitle}</pr_title>`;
 
@@ -241,7 +254,7 @@ export function summaryPrompt({ prTitle, prDescription, files, diff }) {
 
   prompt += `
 
-Write a concise PR summary (3-5 sentences) in Vietnamese. Cover:
+Write a concise PR summary (3-5 sentences) in ${language === 'en' ? 'English' : 'Vietnamese'}. Cover:
 1. What changed and why
 2. Key areas impacted
 3. Any risks or things to watch out for

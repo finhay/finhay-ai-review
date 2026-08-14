@@ -217,3 +217,35 @@ describe('summaryPrompt XML structure', () => {
     assert.ok(!result.includes('<pr_description>'));
   });
 });
+
+describe('reviewPrompt batch awareness', () => {
+  const base = {
+    prTitle: 'feat: x',
+    diff: 'diff --git a/a.ts b/a.ts',
+    fileManifest: '- a.ts (modified, +1/-0)\n- b.ts (modified, +9/-0)',
+  };
+
+  it('tells the model it is reviewing one part of a split PR', () => {
+    const p = reviewPrompt({ ...base, batch: { index: 3, total: 21 } });
+    assert.ok(p.includes('part 3 of 21'));
+    assert.ok(/ONLY this part's files/.test(p));
+  });
+
+  it('stops the model reporting other parts as missing from the diff', () => {
+    const p = reviewPrompt({ ...base, batch: { index: 1, total: 21 } });
+    assert.ok(/NOT missing or empty/.test(p));
+    assert.ok(/never review a file you cannot see/i.test(p));
+  });
+
+  it('suppresses the per-batch summary and the empty-findings prose', () => {
+    const p = reviewPrompt({ ...base, batch: { index: 1, total: 21 } });
+    assert.ok(/Do NOT write a `### Tóm tắt` section/.test(p));
+    assert.ok(/leave `### Findings` empty/.test(p));
+  });
+
+  it('says nothing about batches for a normal single-request review', () => {
+    const p = reviewPrompt(base);
+    assert.ok(!/part \d+ of/.test(p));
+    assert.ok(p.includes('This is a FULL review of the entire PR.'));
+  });
+});
