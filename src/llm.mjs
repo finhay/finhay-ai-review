@@ -80,6 +80,37 @@ export function chunkDiffByFile(diffText) {
 }
 
 /**
+ * Group file chunks into request-sized batches.
+ * One LLM call per file does not scale — a 112-file PR is mostly small diffs
+ * (median ~1.4KB), so it spent 112 round-trips where ~18 would do and blew the
+ * job timeout. Packing keeps each request under the same size cap a single
+ * file would have been truncated to.
+ * Returns array of { filenames, patch }.
+ */
+export function packChunks(fileChunks, maxChars = 15000) {
+  const groups = [];
+  let current = null;
+
+  for (const chunk of fileChunks) {
+    if (current && current.chars + chunk.patch.length <= maxChars) {
+      current.filenames.push(chunk.filename);
+      current.patches.push(chunk.patch);
+      current.chars += chunk.patch.length;
+    } else {
+      // A file larger than maxChars gets its own group and is truncated by the caller.
+      current = {
+        filenames: [chunk.filename],
+        patches: [chunk.patch],
+        chars: chunk.patch.length,
+      };
+      groups.push(current);
+    }
+  }
+
+  return groups.map(g => ({ filenames: g.filenames, patch: g.patches.join('\n') }));
+}
+
+/**
  * Estimate token count (rough: 4 chars ≈ 1 token)
  */
 export function estimateTokens(text) {

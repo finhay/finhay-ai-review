@@ -2,7 +2,7 @@
 // Finhay AI Review — Entry point
 
 import * as gh from './github.mjs';
-import { chat, chunkDiffByFile, estimateTokens } from './llm.mjs';
+import { chat, chunkDiffByFile, estimateTokens, packChunks } from './llm.mjs';
 import {
   systemPrompt, reviewPrompt, interactivePrompt, summaryPrompt,
   learningDetectionPrompt, formatReviewBody, helpText, fixPrompt,
@@ -47,6 +47,9 @@ async function main() {
     reviewLevel: getInput('review_level', 'standard'),
     includeNitpicks: getInput('include_nitpicks', 'false') === 'true',
     conventionsFile: getInput('conventions_file', '.github/review-conventions.md'),
+    // Stop starting new LLM batches past this point so the review still gets
+    // posted before the workflow's timeout-minutes kills the job.
+    reviewBudgetMs: parseInt(getInput('review_budget_minutes', '10')) * 60_000,
     githubToken: getInput('github_token') || process.env.GITHUB_TOKEN,
   };
 
@@ -217,37 +220,54 @@ async function handlePullRequest(event, owner, repo, config) {
 
   let reviewContent;
 
+  let skippedFiles = 0;
+
   if (estimateTokens(diff) > 30000) {
-    // Review per file, merge results
-    console.log(`Large diff (${fileChunks.length} files), reviewing per file`);
+    // Review in packed batches, merge results
+    const groups = packChunks(fileChunks, 15000);
+    console.log(`Large diff (${fileChunks.length} files) — ${groups.length} review requests`);
     const CONCURRENCY = 5;
-    const results = new Array(fileChunks.length);
-    for (let i = 0; i < fileChunks.length; i += CONCURRENCY) {
-      const batch = fileChunks.slice(i, i + CONCURRENCY);
-      const promises = batch.map(async (chunk, j) => {
+    const deadline = Date.now() + config.reviewBudgetMs;
+    const results = new Array(groups.length);
+    let done = 0;
+
+    for (let i = 0; i < groups.length; i += CONCURRENCY) {
+      // Stop issuing work before the job timeout kills us mid-flight — a partial
+      // review that gets posted beats a complete one that never does.
+      if (Date.now() > deadline) {
+        skippedFiles = groups.slice(i).reduce((n, g) => n + g.filenames.length, 0);
+        console.log(`⏱️ Review budget reached — posting ${done}/${groups.length} batches, ${skippedFiles} file(s) not reviewed`);
+        break;
+      }
+
+      const batch = groups.slice(i, i + CONCURRENCY);
+      const promises = batch.map(async (group, j) => {
         const userMsg = reviewPrompt({
           prTitle: safeTitle,
           prDescription: safeBody,
-          diff: truncate(chunk.patch, 15000),
+          diff: truncate(group.patch, 15000),
           isIncremental,
           fileManifest,
           previousReviewSummary,
           fullPRDiff: isIncremental ? truncate(fullDiff, 30000) : undefined,
         });
+        const label = describeGroup(group);
         try {
           const res = await chat(
             [{ role: 'system', content: sysPrompt }, { role: 'user', content: userMsg }],
             { apiBase: config.apiBase, apiKey: config.apiKey, model: config.model, maxTokens: REVIEW_MAX_TOKENS }
           );
-          results[i + j] = `#### ${chunk.filename}\n${res.content}`;
+          results[i + j] = `#### ${label}\n${res.content}`;
         } catch (err) {
-          console.error(`Failed to review ${chunk.filename}: ${err.message}`);
-          results[i + j] = `#### ${chunk.filename}\n⚠️ Review failed for this file.`;
+          console.error(`Failed to review ${label}: ${err.message}`);
+          results[i + j] = `#### ${label}\n⚠️ Review failed for these files.`;
         }
       });
       await Promise.all(promises);
+      done += batch.length;
+      console.log(`Reviewed ${done}/${groups.length} batches (${Math.round((Date.now() - (deadline - config.reviewBudgetMs)) / 1000)}s elapsed)`);
     }
-    reviewContent = results.join('\n\n---\n\n');
+    reviewContent = results.filter(Boolean).join('\n\n---\n\n');
   } else {
     // Single review
     const userMsg = reviewPrompt({
@@ -287,7 +307,10 @@ async function handlePullRequest(event, owner, repo, config) {
 
   // Parse findings for inline comments (use full PR diff for line positioning)
   const { inlineComments, reviewBody } = buildInlineComments(reviewContent, fullDiff, { includeNitpicks: config.includeNitpicks });
-  let body = formatReviewBody(reviewBody, headSha, config.model);
+  const partialNotice = skippedFiles > 0
+    ? `\n\n> ⏱️ PR lớn — ${skippedFiles} file chưa được review trong lượt này (hết ngân sách thời gian). Chạy lại \`${config.triggerWord} full review\` để review tiếp, hoặc tăng \`review_budget_minutes\`.`
+    : '';
+  let body = formatReviewBody(reviewBody + partialNotice, headSha, config.model);
 
   // Try with inline comments, fall back to body-only if GitHub rejects them
   let posted = inlineComments.length > 0
@@ -296,7 +319,7 @@ async function handlePullRequest(event, owner, repo, config) {
 
   if (!posted && inlineComments.length > 0) {
     console.log('Inline comments rejected by GitHub, retrying without inline comments');
-    body = formatReviewBody(reviewContent, headSha, config.model);
+    body = formatReviewBody(reviewContent + partialNotice, headSha, config.model);
   }
 
   if (!posted) {
@@ -582,6 +605,12 @@ async function loadConventions(owner, repo, ref, config) {
     }
   }
   return '';
+}
+
+// Heading for a packed batch — keep it short, a batch can hold a dozen files.
+function describeGroup(group) {
+  const [first, ...rest] = group.filenames;
+  return rest.length > 0 ? `${first} +${rest.length} file(s)` : first;
 }
 
 function buildFileManifest(prFiles) {

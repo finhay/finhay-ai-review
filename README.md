@@ -72,7 +72,7 @@ concurrency:
 jobs:
   review:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     if: |
       github.event_name == 'pull_request' || (
         github.event.comment.user.type != 'Bot' &&
@@ -146,6 +146,7 @@ Comment `@finhay-review` + command trong PR:
 | `review_level` | `standard` | — | Mức độ: relaxed/standard/strict |
 | `include_nitpicks` | `false` | — | Bao gồm nitpick comments |
 | `conventions_file` | `.github/review-conventions.md` | — | File coding conventions |
+| `review_budget_minutes` | `10` | — | Dừng gọi LLM sau X phút và post kết quả đã có. Giữ nhỏ hơn `timeout-minutes` của job |
 
 ### Conventions File
 

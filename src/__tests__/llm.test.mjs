@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeModelOutput } from '../llm.mjs';
+import { sanitizeModelOutput, packChunks } from '../llm.mjs';
 
 describe('sanitizeModelOutput', () => {
   it('returns empty string for null/undefined/empty input', () => {
@@ -122,5 +122,34 @@ I need to see the full content of the new collector and modified files to give a
     assert.ok(!out.includes('I need to see'));
     assert.ok(!out.includes('Let me read'));
     assert.ok(out.includes('## Analysis'));
+  });
+});
+
+describe('packChunks', () => {
+  const chunk = (filename, size) => ({ filename, patch: 'x'.repeat(size) });
+
+  it('packs small files together up to the cap', () => {
+    const groups = packChunks([chunk('a.ts', 400), chunk('b.ts', 400), chunk('c.ts', 400)], 1000);
+    assert.equal(groups.length, 2);
+    assert.deepEqual(groups[0].filenames, ['a.ts', 'b.ts']);
+    assert.deepEqual(groups[1].filenames, ['c.ts']);
+  });
+
+  it('gives an oversized file its own group', () => {
+    const groups = packChunks([chunk('big.ts', 5000), chunk('small.ts', 100)], 1000);
+    assert.deepEqual(groups.map(g => g.filenames), [['big.ts'], ['small.ts']]);
+  });
+
+  it('keeps every file exactly once', () => {
+    const files = Array.from({ length: 112 }, (_, i) => chunk(`f${i}.ts`, 1400));
+    const groups = packChunks(files, 15000);
+    const packed = groups.flatMap(g => g.filenames);
+    assert.equal(packed.length, 112);
+    assert.equal(new Set(packed).size, 112);
+    assert.ok(groups.length < 20, `expected far fewer than 112 requests, got ${groups.length}`);
+  });
+
+  it('returns no groups for an empty diff', () => {
+    assert.deepEqual(packChunks([], 15000), []);
   });
 });
