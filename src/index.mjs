@@ -563,7 +563,9 @@ async function detectLearning(event, owner, repo, config) {
 function buildInlineComments(reviewContent, diff, { includeNitpicks = false } = {}) {
   const parsed = parseFindings(reviewContent);
   parsed.findings = filterGenericFindings(parsed.findings, { includeNitpicks });
-  if (parsed.findings.length === 0) {
+
+  // Nothing recognisable — post the model's text as-is rather than an empty body.
+  if (!parsed.summary && !parsed.verify && !parsed.positives && parsed.findings.length === 0) {
     return { inlineComments: [], reviewBody: reviewContent };
   }
 
@@ -597,8 +599,11 @@ function buildInlineComments(reviewContent, diff, { includeNitpicks = false } = 
     parts.push(`### Findings\n${bodyFindings.join('\n\n')}`);
   } else if (inlineComments.length > 0) {
     parts.push(`### Findings\n_${inlineComments.length} finding(s) posted as inline comments below._`);
+  } else {
+    parts.push('### Findings\n_Không có finding nào ở mức 🔴/🟠/🟡._');
   }
-  if (parsed.positives) parts.push(`### ✅ Điểm tốt\n${parsed.positives}`);
+  if (parsed.verify) parts.push(`### Cần verify\n${parsed.verify}`);
+  if (parsed.positives) parts.push(`### ✅ Điểm tốt\n${capLines(parsed.positives, 10)}`);
 
   const reviewBody = parts.length > 0 ? parts.join('\n\n') : reviewContent;
   return { inlineComments, reviewBody };
@@ -625,6 +630,14 @@ async function loadConventions(owner, repo, ref, config) {
     }
   }
   return '';
+}
+
+// 21 batches each contribute praise, and 31 bullets of it buries the items that
+// actually need attention.
+function capLines(text, max) {
+  const lines = text.split('\n');
+  if (lines.length <= max) return text;
+  return `${lines.slice(0, max).join('\n')}\n- _… và ${lines.length - max} mục khác._`;
 }
 
 // Whole-PR overview for a batched review: the manifest plus a truncated diff is
