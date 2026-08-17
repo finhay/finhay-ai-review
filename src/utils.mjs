@@ -262,10 +262,10 @@ function dedupeLines(sections) {
 
 /**
  * Parse review markdown into structured findings for inline comments.
- * Returns { summary, findings: [{ severity, severityLabel, title, file, line, body, raw }], positives }
+ * Returns { summary, findings: [{ severity, severityLabel, title, file, line, body, raw }], verify, positives }
  */
 export function parseFindings(reviewContent) {
-  const result = { summary: '', findings: [], positives: '' };
+  const result = { summary: '', findings: [], verify: '', positives: '' };
 
   // A large PR is reviewed in batches whose responses are concatenated, so every
   // section can appear more than once. Matching only the first one dropped every
@@ -273,13 +273,16 @@ export function parseFindings(reviewContent) {
   const sections = (pattern) =>
     [...reviewContent.matchAll(pattern)].map(m => m[1].trim()).filter(Boolean);
 
-  result.summary = dedupeLines(sections(/###\s*Tóm tắt\n([\s\S]*?)(?=^###\s|$)/gm)).join('\n');
-  result.positives = dedupeLines(sections(/###\s*✅\s*Điểm tốt\n([\s\S]*?)(?=^###\s|$)/gm)).join('\n');
+  result.summary = dedupeLines(sections(/###\s*Tóm tắt\n([\s\S]*?)(?=^#{3,4}\s|^---\s*$|$(?![\s\S]))/gm)).join('\n');
+  result.positives = dedupeLines(sections(/###\s*✅\s*Điểm tốt\n([\s\S]*?)(?=^#{3,4}\s|^---\s*$|$(?![\s\S]))/gm)).join('\n');
+  // Items the model could not prove from the diff alone. On a batched review
+  // these are most of the output, so they need merging like the rest.
+  result.verify = dedupeLines(sections(/###\s*Cần verify\n([\s\S]*?)(?=^#{3,4}\s|^---\s*$|$(?![\s\S]))/gm)).join('\n');
 
   // Stop at the next `###` header of any kind, not just `### ✅`. `### Cần verify`
   // sits between Findings and Điểm tốt, and anchoring only on ✅ would append that
   // whole section to the body of the last finding — and post it as an inline comment.
-  const findingsSections = sections(/###\s*Findings\n([\s\S]*?)(?=^###\s|$)/gm);
+  const findingsSections = sections(/###\s*Findings\n([\s\S]*?)(?=^#{3,4}\s|^---\s*$|$(?![\s\S]))/gm);
   if (findingsSections.length === 0) return result;
 
   const findingBlocks = findingsSections.flatMap(s => s.split(/(?=^(?:🔴|🟠|🟡|🔵))/m));

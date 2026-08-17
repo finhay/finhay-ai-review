@@ -439,3 +439,45 @@ describe('filterGenericFindings drops empty-batch prose', () => {
     assert.equal(filterGenericFindings(findings).length, 1);
   });
 });
+
+describe('parseFindings captures whole sections, not just the first line', () => {
+  const review = [
+    '### Tóm tắt',
+    'Dòng một của tóm tắt.',
+    'Dòng hai của tóm tắt.',
+    '',
+    '### Findings',
+    '🟠 **Major — Null deref** — `a.ts:12`',
+    '',
+    'Trigger: order undefined khi retry.',
+    'Đề xuất: kiểm tra null trước khi gọi.',
+    '',
+    '### Cần verify',
+    '❓ `b.ts:9` — cần mở MarginConfigs xem có fallback không.',
+    '',
+    '### ✅ Điểm tốt',
+    '- Domain model rõ ràng.',
+    '- Test có cấu trúc tốt.',
+    '',
+  ].join('\n');
+
+  it('keeps the full body of a finding', () => {
+    const { findings } = parseFindings(review);
+    assert.equal(findings.length, 1);
+    assert.ok(findings[0].body.includes('Trigger: order undefined khi retry.'));
+    assert.ok(findings[0].body.includes('Đề xuất: kiểm tra null'));
+  });
+
+  it('keeps every line of the summary and positives', () => {
+    const { summary, positives } = parseFindings(review);
+    assert.ok(summary.includes('Dòng một'));
+    assert.ok(summary.includes('Dòng hai'));
+    assert.ok(positives.includes('Domain model rõ ràng.'));
+    assert.ok(positives.includes('Test có cấu trúc tốt.'));
+  });
+
+  it('collects Cần verify items', () => {
+    const { verify } = parseFindings(review);
+    assert.ok(verify.includes('cần mở MarginConfigs'));
+  });
+});
