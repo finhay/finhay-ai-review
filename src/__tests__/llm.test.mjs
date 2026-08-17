@@ -142,11 +142,18 @@ describe('packChunks', () => {
 
   it('keeps every file exactly once', () => {
     const files = Array.from({ length: 112 }, (_, i) => chunk(`f${i}.ts`, 1400));
-    const groups = packChunks(files, 15000);
+    const groups = packChunks(files);
     const packed = groups.flatMap(g => g.filenames);
     assert.equal(packed.length, 112);
     assert.equal(new Set(packed).size, 112);
-    assert.ok(groups.length < 20, `expected far fewer than 112 requests, got ${groups.length}`);
+    assert.ok(groups.length < 10, `expected far fewer than 112 requests, got ${groups.length}`);
+  });
+
+  it('never exceeds the cap except for a single oversized file', () => {
+    const files = Array.from({ length: 50 }, (_, i) => chunk(`f${i}.ts`, 9000));
+    for (const g of packChunks(files)) {
+      assert.ok(g.patch.length <= 40000 || g.filenames.length === 1);
+    }
   });
 
   it('returns no groups for an empty diff', () => {

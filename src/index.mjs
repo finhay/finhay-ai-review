@@ -17,6 +17,12 @@ import { getInput, parseRepo, readEventPayload, countDiffLines, truncate, saniti
 // auto-fix.
 const REVIEW_MAX_TOKENS = 8192;
 
+// How much diff goes into one batched review request. At 15KB a 265KB PR became
+// 21 slices that could not see each other, so cross-file questions ("cần mở
+// MarginConfigs…") outnumbered findings. Wider slices carry more of the callees
+// a finding needs to be provable.
+const BATCH_MAX_CHARS = 40000;
+
 /**
  * Build a safe PR context that prefers webhook payload data (captured at trigger time)
  * over fetched data, preventing TOCTOU attacks where attackers edit PR content
@@ -227,7 +233,7 @@ async function handlePullRequest(event, owner, repo, config) {
 
   if (estimateTokens(diff) > 30000) {
     // Review in packed batches, merge results
-    const groups = packChunks(fileChunks, 15000);
+    const groups = packChunks(fileChunks, BATCH_MAX_CHARS);
     console.log(`Large diff (${fileChunks.length} files) — ${groups.length} review requests`);
     const CONCURRENCY = 5;
     const deadline = Date.now() + config.reviewBudgetMs;
@@ -251,7 +257,7 @@ async function handlePullRequest(event, owner, repo, config) {
         const userMsg = reviewPrompt({
           prTitle: safeTitle,
           prDescription: safeBody,
-          diff: truncate(group.patch, 15000),
+          diff: truncate(group.patch, BATCH_MAX_CHARS),
           isIncremental,
           fileManifest,
           previousReviewSummary,

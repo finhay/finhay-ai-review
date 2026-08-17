@@ -87,7 +87,7 @@ export function chunkDiffByFile(diffText) {
  * file would have been truncated to.
  * Returns array of { filenames, patch }.
  */
-export function packChunks(fileChunks, maxChars = 15000) {
+export function packChunks(fileChunks, maxChars = 40000) {
   const groups = [];
   let current = null;
 
