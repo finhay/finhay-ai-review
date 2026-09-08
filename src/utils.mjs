@@ -4,12 +4,13 @@
  * Simple glob matching (supports * and **)
  */
 export function minimatch(filepath, pattern) {
-  // Convert glob to regex
-  const regex = pattern
-    .replace(/\./g, '\\.')
-    .replace(/\*\*/g, '{{GLOBSTAR}}')
-    .replace(/\*/g, '[^/]*')
-    .replace(/\{\{GLOBSTAR\}\}/g, '.*');
+  let regex = '';
+  for (let i = 0; i < pattern.length; i++) {
+    if (pattern.slice(i, i + 3) === '**/') { regex += '(?:.*/)?'; i += 2; }
+    else if (pattern.slice(i, i + 2) === '**') { regex += '.*'; i++; }
+    else if (pattern[i] === '*') regex += '[^/]*';
+    else regex += pattern[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
   return new RegExp(`^${regex}$`).test(filepath);
 }
 
@@ -86,11 +87,13 @@ export function parseDiffMap(diffText) {
   const map = new Map();
   let currentFile = null;
   let newLine = 0;
+  let inHunk = false;
 
   for (const line of diffText.split('\n')) {
     const fileMatch = line.match(/^diff --git a\/.+ b\/(.+)$/);
     if (fileMatch) {
       currentFile = fileMatch[1];
+      inHunk = false;
       if (!map.has(currentFile)) map.set(currentFile, new Set());
       continue;
     }
@@ -98,17 +101,18 @@ export function parseDiffMap(diffText) {
     const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
     if (hunkMatch) {
       newLine = parseInt(hunkMatch[1]);
+      inHunk = true;
       continue;
     }
 
-    if (!currentFile) continue;
+    if (!currentFile || !inHunk) continue;
 
-    if (line.startsWith('+') && !line.startsWith('+++')) {
+    if (line.startsWith('+')) {
       map.get(currentFile).add(newLine);
       newLine++;
-    } else if (line.startsWith('-') && !line.startsWith('---')) {
+    } else if (line.startsWith('-')) {
       // deleted line — don't increment new line counter
-    } else if (!line.startsWith('\\')) {
+    } else if (line.startsWith(' ')) {
       // context line — valid for inline comments
       map.get(currentFile).add(newLine);
       newLine++;
@@ -130,6 +134,8 @@ export function extractPRMetadata(reviewContent) {
 
   try {
     const { title, description } = JSON.parse(match[1]);
+    if (title != null && (typeof title !== 'string' || title.length > 256 || /[\r\n]/.test(title))) throw new Error('Invalid title');
+    if (description != null && (typeof description !== 'string' || description.length > 50000)) throw new Error('Invalid description');
     return { title: title || null, description: description || null, cleanContent };
   } catch {
     console.error('Failed to parse pr-metadata JSON block');
@@ -150,6 +156,7 @@ export function isMergeCommitPush(commit) {
 }
 
 const GENERIC_FINDING_PATTERNS = [
+  /^\s*no\s+(?:actionable|significant|new)\s+(?:findings|issues)/i,
   /missing\s+(file\s+)?newline|trailing\s+newline|no\s+newline\s+at\s+end\s+of\s+file/i,
   /no\s+test\s+coverage|thiếu\s+(unit\s+)?test|missing\s+unit\s+test|consider\s+adding\s+tests/i,
   /generic\s+security\s+(hardening|advice)|consider\s+adding\s+logging/i,

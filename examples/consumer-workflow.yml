@@ -1,0 +1,46 @@
+# .github/workflows/ai-review.yml
+name: AI Code Review
+on:
+  pull_request:
+    types: [opened, synchronize]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  # Pushes to the same PR supersede each other, but every comment gets its own
+  # group: concurrency is evaluated before the job `if`, so a comment run that
+  # ends up skipped would still cancel a review that is mid-flight.
+  group: ai-review-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event.comment.id || 'push' }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: |
+      github.event_name == 'pull_request' || github.event_name == 'pull_request_target' || (
+        github.event.comment.user.type != 'Bot' &&
+        (contains(github.event.comment.body, '@finhay-review') ||
+         (github.event_name == 'pull_request_review_comment' && github.event.comment.in_reply_to_id))
+      )
+    steps:
+      # Nếu dùng GitHub App (custom bot name/avatar):
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ vars.AI_REVIEW_APP_ID }}
+          private-key: ${{ secrets.AI_REVIEW_APP_PRIVATE_KEY }}
+
+      - uses: finhay/finhay-ai-review@v1
+        with:
+          model: ${{ vars.AI_REVIEW_MODEL }}
+          api_base: ${{ vars.AI_REVIEW_API_BASE }}
+          api_key: ${{ secrets.AI_REVIEW_API_KEY }}
+          github_token: ${{ steps.app-token.outputs.token }}

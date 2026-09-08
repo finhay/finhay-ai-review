@@ -8,10 +8,10 @@ AI-powered PR review action hỗ trợ bất kỳ OpenAI-compatible API (OpenAI,
 - 🔄 **Incremental Review** — Chỉ review code mới khi push thêm commits
 - 💬 **Interactive Chat** — Hỏi đáp về code qua `@finhay-review`
 - 📋 **PR Summary** — Tóm tắt PR tự động
-- 📚 **Learnings** — Ghi nhớ team preferences, review càng dùng càng đúng
+- 📚 **Learnings** — Ghi nhớ team preferences, load team rules từ repo; đề xuất learning từ feedback
 - 📏 **Conventions** — Load coding conventions từ repo
 - 🎯 **Severity Levels** — Critical → Major → Minor → Nitpick
-- 📝 **PR Metadata Auto-fix** — Tự động reformat PR title theo conventional commits và generate description
+- 📝 **PR Metadata Auto-fix** — Opt-in reformat PR title theo conventional commits và generate description
 
 ## Quick Start (2 phút)
 
@@ -74,13 +74,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: |
-      github.event_name == 'pull_request' || (
+      github.event_name == 'pull_request' || github.event_name == 'pull_request_target' || (
         github.event.comment.user.type != 'Bot' &&
-        contains(github.event.comment.body, '@finhay-review')
+        (contains(github.event.comment.body, '@finhay-review') ||
+         (github.event_name == 'pull_request_review_comment' && github.event.comment.in_reply_to_id))
       )
     steps:
-      - uses: actions/checkout@v4
-
       # Nếu dùng GitHub App (custom bot name/avatar):
       - uses: actions/create-github-app-token@v1
         id: app-token
@@ -126,7 +125,7 @@ Comment `@finhay-review` + command trong PR:
 | `@finhay-review summary` | Tạo tóm tắt PR |
 | `@finhay-review pause` | Tạm dừng auto review |
 | `@finhay-review resume` | Bật lại auto review |
-| `@finhay-review resolve` | Resolve tất cả comments |
+| `@finhay-review resolve` | Chưa hỗ trợ; resolve threads trực tiếp trên GitHub |
 | `@finhay-review help` | Hiện help |
 
 ## Configuration
@@ -146,7 +145,9 @@ Comment `@finhay-review` + command trong PR:
 | `review_level` | `standard` | — | Mức độ: relaxed/standard/strict |
 | `include_nitpicks` | `false` | — | Bao gồm nitpick comments |
 | `conventions_file` | `.github/review-conventions.md` | — | File coding conventions |
-| `review_budget_minutes` | `10` | — | Dừng gọi LLM sau X phút và post kết quả đã có. Giữ nhỏ hơn `timeout-minutes` của job |
+| `review_budget_minutes` | `10` | — | Tổng ngân sách LLM gồm review, verification và summary. Hết giờ post coverage còn thiếu; giữ nhỏ hơn job timeout |
+| `verify_findings` | `true` | — | Kiểm chứng findings với source tại reviewed SHA; tăng số request LLM |
+| `auto_fix_metadata` | `false` | — | Cho phép sửa title/description sau initial review hoàn chỉnh |
 
 ### Conventions File
 
@@ -168,7 +169,7 @@ Bot tự detect thêm: `CLAUDE.md`, `.cursorrules`, `CONVENTIONS.md`, `.github/c
 
 ### Learnings System
 
-Bot học từ feedback của reviewer. Khi reply sửa review comment → bot hỏi có muốn lưu learning không.
+Bot đọc rules đã được merge vào base branch. Khi reply sửa review comment, bot có thể đề xuất một rule. Maintainer thêm rule vào `.github/review-learnings.json` qua PR; bot chưa tự lưu hoặc tạo PR khi reply `yes`. Workflow cần nhận các inline replies không có trigger word (như example ở trên).
 
 Learnings lưu tại `.github/review-learnings.json`:
 
@@ -187,14 +188,14 @@ Learnings hỗ trợ path-based matching — rule chỉ apply cho files match gl
 
 ### PR Metadata Auto-fix
 
-Bot tự động cải thiện PR title và description trong mỗi review:
+Mặc định **không sửa** metadata. Bật `auto_fix_metadata: true` để cải thiện title/description sau initial review hoàn chỉnh:
 
 - **Title** — Reformat theo [Conventional Commits](https://www.conventionalcommits.org/) (`type(scope): subject`)
   - Branch names (`feature/xyz`) → rewrite dựa trên diff
   - Descriptive nhưng sai format (`Add JWT validation`) → `feat(auth): add JWT validation`
   - Fix typos
 - **Description** — Generate nếu trống, cải thiện nếu thiếu cấu trúc (giữ nguyên thông tin gốc)
-- Review comment giải thích những gì đã thay đổi
+- Trước khi sửa, bot kiểm tra PR còn mở, SHA không đổi và title/body vẫn giống lúc bắt đầu. GitHub không có atomic compare-and-set cho metadata, nên opt-in này vẫn có một khoảng race nhỏ; giữ tắt nếu cần bảo toàn tuyệt đối mọi edit đồng thời.
 
 ## Architecture
 
@@ -218,7 +219,7 @@ GitHub Event
     └── Review comment reply ──→ Learning Detection
                                  ├── Is this a correction?
                                  ├── Extract learning rule
-                                 └── Ask to save
+                                 └── Suggest a rule for manual PR
 ```
 
 ## Supported Providers
@@ -250,15 +251,13 @@ Bất kỳ provider nào hỗ trợ OpenAI-compatible API:
     api_key: ${{ secrets.GOOGLE_API_KEY }}
 ```
 
-## Cost Estimate
+## Cost measurement
 
-| Model | Cost/review | 50 PRs/tuần |
-|-------|------------|-------------|
-| DeepSeek Chat | ~$0.001-0.005 | ~$0.05-0.25 |
-| Gemini 2.5 Flash | ~$0.002-0.01 | ~$0.10-0.50 |
-| GPT-4o mini | ~$0.005-0.01 | ~$0.25-0.50 |
-| GPT-4o | ~$0.02-0.05 | ~$1-2.50 |
-| Claude Sonnet | ~$0.03-0.10 | ~$1.50-5.00 |
+Verification adds a model request for each candidate that passes the deterministic
+filters. Historical per-review estimates without verification are not applicable.
+Use `reviewMetrics` logs to measure returned prompt/completion tokens, calls and
+latency on representative PRs, then apply your provider's current pricing. Failed
+or retried calls may incur usage not included in successful-response token totals.
 
 ## FAQ
 
@@ -269,11 +268,42 @@ A: Nếu diff > `max_diff_lines` (default 10K), bot skip + comment hướng dẫ
 A: Comment `@finhay-review pause` trên PR đó.
 
 **Q: Bot review sai?**
-A: Reply sửa → bot sẽ hỏi có muốn lưu learning. Learning giúp review chính xác hơn lần sau.
+A: Reply sửa → bot có thể đề xuất rule. Thêm rule qua PR vào review-learnings.json; không có auto-save.
 
 **Q: Chạy trên fork PRs?**
-A: Dùng `pull_request_target` thay `pull_request` nhưng cẩn thận với permissions.
+A: Action xử lý `pull_request_target` qua API, không cần checkout code PR. Nếu dùng event này, không thêm bước checkout/run code từ fork với token/secrets của base repo.
 
 ## License
 
 MIT
+
+## Reliability and review coverage
+
+Reviews record the base SHA, reviewed SHA, comparison base and completed batch IDs.
+A SHA alone from an older action version is not considered proof of complete coverage;
+the first run after upgrading may do a full review.
+
+- Diffs are split at file/hunk lines and packed without truncating reviewed code. A single oversized line remains unreviewed and is reported explicitly.
+- `review` resumes unfinished batches on the same snapshot. A new head reviews from the last complete checkpoint, or from the PR base when no trustworthy checkpoint exists. `full review` deliberately starts over.
+- Merge commits are reviewed. Force-pushes and base changes fall back to full review when the previous checkpoint is no longer applicable.
+- Both review output and optional source context use immutable SHAs. The bot checks that the PR is open and unchanged before posting; reviews carry `commit_id` in case a push races with posting.
+- Verification reads at most four bounded source excerpts per candidate, using imports and filename matches. This is heuristic context retrieval, not a complete call graph. Unsupported candidates are dropped or moved to “Cần verify”; verifier failures leave the batch incomplete.
+- Review completeness means all eligible diff batches were processed successfully, not that every bug was found. Generated/binary exclusions still apply. Duplicate findings within a run are collapsed, and incremental prompts include previous review context.
+- Structured `reviewMetrics` logs report model calls, failed requests, returned token usage, verification outcomes and elapsed time. Token counts cover successful responses that include usage; they are not a billing total.
+- Conventions and learnings come from the trusted base revision. Model-generated PR metadata is disabled by default.
+
+Existing consumers must copy the updated workflow conditions and concurrency group;
+upgrading the action reference alone does not update workflows in other repositories.
+An example is available in [examples/consumer-workflow.yml](examples/consumer-workflow.yml).
+
+## Development and evaluation
+
+```sh
+npm test
+npm run eval
+```
+
+`npm test` includes mocked event orchestration, HTTP failure handling, snapshot consistency,
+partial-review recovery and finding validation. `npm run eval` checks deterministic filters
+on minimized reproductions of historical PR findings. It makes no model requests and does
+not measure model accuracy. See [evals/README.md](evals/README.md) for live replay.

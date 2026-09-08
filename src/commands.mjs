@@ -7,6 +7,7 @@
 export function parseCommand(body, triggerWord = '@finhay-review') {
   if (!body) return null;
 
+  body = body.trim();
   const trigger = triggerWord.toLowerCase();
   const lower = body.toLowerCase().trim();
 

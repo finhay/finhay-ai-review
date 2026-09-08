@@ -34,8 +34,14 @@ inputs:
     description: 'Path to conventions file'
     default: '.github/review-conventions.md'
   review_budget_minutes:
-    description: 'Stop starting new LLM batches after this many minutes and post what is done. Keep below the job timeout-minutes'
+    description: 'Total LLM budget including verification and response bodies. Post partial coverage at expiry; keep below job timeout-minutes'
     default: '10'
+  verify_findings:
+    description: 'Verify candidate findings against bounded source context before posting (adds model requests)'
+    default: 'true'
+  auto_fix_metadata:
+    description: 'Opt in to updating the PR title and description after a complete initial review'
+    default: 'false'
   github_token:
     description: 'GitHub token for API access. Use a GitHub App token for custom bot name/avatar, or leave default for github-actions[bot]'
     default: ${{ github.token }}

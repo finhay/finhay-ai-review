@@ -52,36 +52,73 @@ export async function getBotLogin() {
   return _botLogin;
 }
 
+let runtime = {};
+export function setRuntime(overrides = {}) { runtime = overrides; }
+
 async function ghFetch(path, options = {}) {
-  const url = path.startsWith('http') ? path : `${_apiBase}${path}`;
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+  const url = `${_apiBase}${path}`;
+  const readOnly = !options.method || options.method === 'GET';
+  const attempts = readOnly ? MAX_RETRIES : 1; // Never replay an ambiguously successful write.
+  for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      const res = await fetch(url, {
+      const res = await (runtime.fetch || fetch)(url, {
         ...options,
+        signal: AbortSignal.timeout(runtime.timeoutMs || 30000),
         headers: {
-          'Accept': 'application/vnd.github.v3+json',
-          'Authorization': `Bearer ${_token}`,
+          Accept: 'application/vnd.github.v3+json',
+          Authorization: `Bearer ${_token}`,
+          'Content-Type': 'application/json',
           'X-GitHub-Api-Version': '2022-11-28',
           ...options.headers,
         },
       });
-      if (res.status === 403 && res.headers.get('x-ratelimit-remaining') === '0') {
-        const reset = Number(res.headers.get('x-ratelimit-reset')) * 1000;
-        const wait = Math.min(reset - Date.now(), 60000);
-        console.log(`GitHub rate limited, waiting ${wait}ms`);
-        await sleep(Math.max(wait, 1000));
+      const body = await res.text();
+      const retryable = res.status >= 500 || res.status === 429 ||
+        (res.status === 403 && res.headers.get('x-ratelimit-remaining') === '0');
+      if (retryable) {
+        if (attempt === attempts - 1) throw Object.assign(new Error(`GitHub API exhausted retries: ${res.status}`), { final: true });
+        await (runtime.sleep || sleep)(RETRY_BASE_MS * 2 ** attempt);
         continue;
       }
-      if (res.status >= 500) {
-        await sleep(RETRY_BASE_MS * Math.pow(2, attempt));
-        continue;
-      }
-      return res;
+      return new Response(res.status === 204 ? null : body, { status: res.status, headers: res.headers });
     } catch (err) {
-      if (attempt === MAX_RETRIES - 1) throw err;
-      await sleep(RETRY_BASE_MS * Math.pow(2, attempt));
+      if (err.final || attempt === attempts - 1) throw err;
+      await (runtime.sleep || sleep)(RETRY_BASE_MS * 2 ** attempt);
     }
   }
+}
+
+function requireOK(res) {
+  if (!res.ok) throw new Error(`GitHub API failed: ${res.status}`);
+  return res;
+}
+
+async function getAll(path) {
+  const items = [];
+  for (let page = 1; ; page++) {
+    const res = requireOK(await ghFetch(`${path}?per_page=100&page=${page}`));
+    const batch = await res.json();
+    if (!Array.isArray(batch)) throw new Error('Expected a GitHub list response');
+    items.push(...batch);
+    if (!res.headers.get('link')?.includes('rel="next"')) return items;
+  }
+}
+
+export async function getCompareInfo(owner, repo, baseSha, headSha) {
+  const res = await ghFetch(`/repos/${owner}/${repo}/compare/${baseSha}...${headSha}?per_page=1`);
+  if (res.status === 404) return null;
+  return requireOK(res).json();
+}
+
+export async function getBotInlineComments(owner, repo, number, botLogin) {
+  return (await getAll(`/repos/${owner}/${repo}/pulls/${number}/comments`))
+    .filter(item => item.user?.login === botLogin || (isBotUser(item.user) && item.body?.includes('<!-- finhay-finding:')));
+}
+
+export async function getTreePaths(owner, repo, sha) {
+  const data = await requireOK(await ghFetch(`/repos/${owner}/${repo}/git/trees/${sha}?recursive=1`)).json();
+  // A partial tree is usable for context, but never represents review coverage.
+  return data.tree.filter(item => item.type === 'blob').map(item => item.path);
 }
 
 /**
@@ -92,8 +129,7 @@ export async function getPRDiff(owner, repo, prNumber) {
     headers: { 'Accept': 'application/vnd.github.v3.diff' },
   });
   if (!res.ok) {
-    console.error(`Failed to fetch PR diff: ${res.status} ${res.statusText}`);
-    return '';
+    requireOK(res);
   }
   return res.text();
 }
@@ -103,15 +139,15 @@ export async function getPRDiff(owner, repo, prNumber) {
  */
 export async function getPR(owner, repo, prNumber) {
   const res = await ghFetch(`/repos/${owner}/${repo}/pulls/${prNumber}`);
-  return res.ok ? res.json() : null;
+  if (res.status === 404) return null;
+  return requireOK(res).json();
 }
 
 /**
  * Get changed files list
  */
 export async function getPRFiles(owner, repo, prNumber) {
-  const res = await ghFetch(`/repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=100`);
-  return res.ok ? res.json() : [];
+  return getAll(`/repos/${owner}/${repo}/pulls/${prNumber}/files`);
 }
 
 /**
@@ -120,8 +156,8 @@ export async function getPRFiles(owner, repo, prNumber) {
  */
 export async function getCommit(owner, repo, sha) {
   const res = await ghFetch(`/repos/${owner}/${repo}/commits/${sha}`);
-  if (!res.ok) return null;
-  const data = await res.json();
+  if (res.status === 404) return null;
+  const data = await requireOK(res).json();
   return {
     message: data.commit?.message || '',
     parents: data.parents || [],
@@ -136,8 +172,7 @@ export async function getCompare(owner, repo, baseSha, headSha) {
     headers: { 'Accept': 'application/vnd.github.v3.diff' },
   });
   if (!res.ok) {
-    console.error(`Failed to fetch compare diff: ${res.status} ${res.statusText}`);
-    return '';
+    requireOK(res);
   }
   return res.text();
 }
@@ -146,8 +181,8 @@ export async function getCompare(owner, repo, baseSha, headSha) {
  * Post a PR review (proper review, not just comment)
  * event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES'
  */
-export async function postReview(owner, repo, prNumber, body, event = 'COMMENT', comments = []) {
-  const payload = { body, event };
+export async function postReview(owner, repo, prNumber, body, event = 'COMMENT', comments = [], commitId) {
+  const payload = { body, event, ...(commitId ? { commit_id: commitId } : {}) };
   if (comments.length > 0) {
     payload.comments = comments;
   }
@@ -174,7 +209,8 @@ export async function postComment(owner, repo, issueNumber, body) {
     const err = await res.text();
     console.error(`Failed to post comment: ${res.status} ${err.slice(0, 300)}`);
   }
-  return res.ok;
+  requireOK(res);
+  return true;
 }
 
 /**
@@ -185,13 +221,12 @@ export async function replyToReviewComment(owner, repo, prNumber, commentId, bod
     method: 'POST',
     body: JSON.stringify({ body }),
   });
-  return res.ok;
+  requireOK(res);
+  return true;
 }
 
 async function fetchBotItems(apiPath, botLogin) {
-  const res = await ghFetch(`${apiPath}?per_page=100`);
-  if (!res.ok) return [];
-  const items = await res.json();
+  const items = await getAll(apiPath);
   // Login match covers GITHUB_TOKEN; marker match covers App tokens whose login
   // we can't resolve. Without the fallback these return [] and the caller loses
   // pause state and the last-reviewed SHA.
@@ -209,21 +244,23 @@ export async function getBotComments(owner, repo, issueNumber, botLogin) {
 
 export async function getComment(owner, repo, commentId) {
   const res = await ghFetch(`/repos/${owner}/${repo}/issues/comments/${commentId}`);
-  return res.ok ? res.json() : null;
+  if (res.status === 404) return null;
+  return requireOK(res).json();
 }
 
 export async function getReviewComment(owner, repo, commentId) {
   const res = await ghFetch(`/repos/${owner}/${repo}/pulls/comments/${commentId}`);
-  return res.ok ? res.json() : null;
+  if (res.status === 404) return null;
+  return requireOK(res).json();
 }
 
 /**
  * Get file content from repo
  */
 export async function getFileContent(owner, repo, path, ref = 'HEAD') {
-  const res = await ghFetch(`/repos/${owner}/${repo}/contents/${path}?ref=${ref}`);
-  if (!res.ok) return null;
-  const data = await res.json();
+  const res = await ghFetch(`/repos/${owner}/${repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(ref)}`);
+  if (res.status === 404) return null;
+  const data = await requireOK(res).json();
   if (data.encoding === 'base64') {
     return Buffer.from(data.content, 'base64').toString('utf8');
   }
