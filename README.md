@@ -256,8 +256,8 @@ Bất kỳ provider nào hỗ trợ OpenAI-compatible API:
 Verification adds a model request for each candidate that passes the deterministic
 filters. Historical per-review estimates without verification are not applicable.
 Use `reviewMetrics` logs to measure returned prompt/completion tokens, calls and
-latency on representative PRs, then apply your provider's current pricing. Failed
-or retried calls may incur usage not included in successful-response token totals.
+latency on representative PRs, then apply your provider's current pricing. Returned usage is accumulated across retries, including rejected empty or truncated
+responses. Requests that time out or fail without usage may still incur unreported cost.
 
 ## FAQ
 
@@ -284,12 +284,13 @@ A SHA alone from an older action version is not considered proof of complete cov
 the first run after upgrading may do a full review.
 
 - Diffs are split at file/hunk lines and packed without truncating reviewed code. A single oversized line remains unreviewed and is reported explicitly.
+- Incomplete reviews publish their resumable coverage and then fail the Actions job, including manually triggered reviews. A green review check therefore no longer hides partial model failures.
 - `review` resumes unfinished batches on the same snapshot. A new head reviews from the last complete checkpoint, or from the PR base when no trustworthy checkpoint exists. `full review` deliberately starts over.
 - Merge commits are reviewed. Force-pushes and base changes fall back to full review when the previous checkpoint is no longer applicable.
 - Both review output and optional source context use immutable SHAs. The bot checks that the PR is open and unchanged before posting; reviews carry `commit_id` in case a push races with posting.
 - Verification reads at most four bounded source excerpts per candidate, using imports and filename matches. This is heuristic context retrieval, not a complete call graph. Unsupported candidates are dropped or moved to “Cần verify”; verifier failures leave the batch incomplete.
 - Review completeness means all eligible diff batches were processed successfully, not that every bug was found. Generated/binary exclusions still apply. Duplicate findings within a run are collapsed, and incremental prompts include previous review context.
-- Structured `reviewMetrics` logs report model calls, failed requests, returned token usage, verification outcomes and elapsed time. Token counts cover successful responses that include usage; they are not a billing total.
+- Structured `reviewMetrics` logs report logical model calls, failed calls, returned token usage across attempts, verification outcomes and elapsed time. Token counts include rejected responses when usage is returned; they are not a billing total.
 - Conventions and learnings come from the trusted base revision. Model-generated PR metadata is disabled by default.
 
 Existing consumers must copy the updated workflow conditions and concurrency group;
@@ -307,3 +308,18 @@ npm run eval
 partial-review recovery and finding validation. `npm run eval` checks deterministic filters
 on minimized reproductions of historical PR findings. It makes no model requests and does
 not measure model accuracy. See [evals/README.md](evals/README.md) for live replay.
+
+### DeepSeek V4 request handling
+
+For `deepseek-v4-pro` and `deepseek-v4-flash` (including suffixed versions), the
+client explicitly enables thinking with `reasoning_effort: low`, reserves at least
+32,768 output tokens for reasoning and the answer, and allows up to four minutes
+per attempt. The total review budget still bounds every attempt. Other models keep
+the existing token limits and two-minute request timeout.
+
+A V4 response ending with `length` can retry with a doubled token limit, capped at
+65,536. Empty final answers retry within the existing three-attempt limit and total
+budget. Truncated answers are never accepted as completed reviews. These limits can
+increase token consumption; returned usage from all attempts is included in metrics.
+Failure diagnostics include the finish reason, reasoning character count and token
+limit without logging the response or reasoning text.

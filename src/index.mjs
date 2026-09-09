@@ -85,7 +85,12 @@ export async function main() {
 }
 
 // Review orchestration is separately injectable for event-level tests.
-export const handlePullRequest = reviewPullRequest;
+export async function handlePullRequest(event, owner, repo, config, dependencies) {
+  const result = await reviewPullRequest(event, owner, repo, config, dependencies);
+  // Publish resumable coverage first, then fail both automatic and manual jobs.
+  if (result.status === 'partial') throw new Error('AI review incomplete; partial coverage saved. Retry the review to finish pending batches.');
+  return result;
+}
 
 // ===== Issue/PR comment with @trigger =====
 export async function handleIssueComment(event, owner, repo, config) {

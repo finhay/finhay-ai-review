@@ -5,22 +5,28 @@ const RETRY_BASE_MS = 1000;
 const REQUEST_TIMEOUT_MS = 120_000; // 2 minutes per request
 
 export async function chat(messages, { apiBase, apiKey, model, temperature = 0.1,
-  maxTokens = 4096, deadline = Infinity, timeoutMs = REQUEST_TIMEOUT_MS,
+  maxTokens = 4096, deadline = Infinity, timeoutMs,
   fetchImpl = fetch, sleepImpl = sleep }) {
   const url = `${apiBase.replace(/\/$/, '')}/chat/completions`;
+  // V4 defaults to high-effort thinking. Reserve room for reasoning even for
+  // short verifier/summary answers, and keep all attempts inside the run budget.
+  const thinking = /^deepseek-v4-(pro|flash)(?:-|$)/i.test(model);
+  let tokenLimit = thinking ? Math.max(maxTokens, 32768) : maxTokens;
+  const requestTimeout = timeoutMs ?? (thinking ? 240_000 : REQUEST_TIMEOUT_MS);
+  const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new Error('Review budget exhausted');
+    if (remaining <= 0) throw Object.assign(new Error('Review budget exhausted'), { usage });
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), Math.min(timeoutMs, remaining));
+    const timer = setTimeout(() => controller.abort(), Math.min(requestTimeout, remaining));
     let error;
     try {
       const res = await fetchImpl(url, {
         method: 'POST', signal: controller.signal,
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens }),
+        body: JSON.stringify({ model, messages, max_tokens: tokenLimit,
+          ...(thinking ? { thinking: { type: 'enabled' }, reasoning_effort: 'low' } : { temperature }) }),
       });
-      // Keep the timeout active until the response body has finished arriving.
       const body = await res.text();
       if (!res.ok) {
         error = new Error(`LLM API error ${res.status}`);
@@ -30,22 +36,35 @@ export async function chat(messages, { apiBase, apiKey, model, temperature = 0.1
         throw error;
       }
       const data = JSON.parse(body);
+      for (const key of Object.keys(usage)) {
+        const value = data.usage?.[key];
+        if (Number.isFinite(value) && value >= 0) usage[key] += value;
+      }
       const choice = data.choices?.[0];
-      if (!choice || typeof choice.message?.content !== 'string' || !choice.message.content.trim()) {
-        throw Object.assign(new Error('LLM returned no text'), { retryable: false });
+      // Only log bounded metadata, never response text or reasoning contents.
+      const reason = ['stop', 'length', 'content_filter', 'tool_calls', 'insufficient_system_resource'].includes(choice?.finish_reason)
+        ? choice.finish_reason : 'missing_or_unknown';
+      const reasoningChars = typeof choice?.message?.reasoning_content === 'string' ? choice.message.reasoning_content.length : 0;
+      const diagnostic = `finish_reason=${reason}, reasoning_chars=${reasoningChars}, max_tokens=${tokenLimit}`;
+      if (reason !== 'stop') {
+        const retryable = (reason === 'length' && thinking && tokenLimit < 65536) || reason === 'insufficient_system_resource';
+        if (reason === 'length' && retryable) tokenLimit = Math.min(tokenLimit * 2, 65536);
+        throw Object.assign(new Error(`LLM response incomplete (${diagnostic})`), { retryable });
       }
-      if (choice.finish_reason !== 'stop') {
-        throw Object.assign(new Error(`LLM response incomplete (${choice.finish_reason || 'missing finish_reason'})`), { retryable: false });
+      const content = typeof choice?.message?.content === 'string' ? sanitizeModelOutput(choice.message.content) : '';
+      if (!content.trim()) {
+        throw Object.assign(new Error(`LLM returned no text (${diagnostic})`), { retryable: true });
       }
-      return { content: sanitizeModelOutput(choice.message.content), usage: data.usage || {} };
+      return { content, usage };
     } catch (err) {
-      error = err;
-      if (err.retryable === false || attempt === MAX_RETRIES - 1) throw err;
+      error = controller.signal.aborted ? new Error('LLM request timed out before the response body completed') : err;
+      error.usage = { ...usage };
+      if (error.retryable === false || attempt === MAX_RETRIES - 1) throw error;
     } finally {
       clearTimeout(timer);
     }
     const wait = error.retryAfterMs || RETRY_BASE_MS * 2 ** attempt;
-    if (Date.now() + wait >= deadline) throw new Error('Review budget exhausted');
+    if (Date.now() + wait >= deadline) throw Object.assign(new Error('Review budget exhausted'), { usage });
     await sleepImpl(wait);
   }
 }

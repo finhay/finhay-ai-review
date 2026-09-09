@@ -157,3 +157,21 @@ test('resuming a partial full-review preserves its comparison base', async () =>
   const result = await reviewPullRequest(s.event, 'o', 'r', config, { gh: s.gh, chat: async () => clean });
   assert.equal(result.status, 'complete'); assert.equal(result.coverage.diffBase, 'base');
 });
+
+test('action fails only after saving partial coverage and accounts for failed response usage', async () => {
+  const { handlePullRequest } = await import('../index.mjs');
+  for (const manual of [false, true]) {
+    const s = setup();
+    const chat = async () => { throw Object.assign(new Error('provider failure'), { usage: { prompt_tokens: 12, completion_tokens: 34, total_tokens: 46 } }); };
+    await assert.rejects(handlePullRequest({ ...s.event, manual }, 'o', 'r', config, { gh: s.gh, chat }), /incomplete.*coverage saved/);
+    assert.equal(s.posted.length, 1);
+    assert.equal(readCoverage(s.posted[0][3]).complete, false);
+    const result = await reviewPullRequest(s.event, 'o', 'r', config, { gh: s.gh, chat });
+    assert.equal(result.metrics.totalTokens, 46);
+    assert.equal(result.metrics.completionTokens, 34);
+    assert.equal(result.metrics.failedRequests, 1);
+  }
+  const s = setup();
+  const result = await handlePullRequest(s.event, 'o', 'r', config, { gh: s.gh, chat: async () => clean });
+  assert.equal(result.status, 'complete');
+});

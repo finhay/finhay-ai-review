@@ -56,6 +56,59 @@ test('LLM timeout covers stalled response body, not just headers', async () => {
     calls++;
     return { ok: true, text: () => new Promise((_, reject) => signal.addEventListener('abort', () => reject(new Error('body aborted')))) };
   };
-  await assert.rejects(chat([], { apiBase: 'https://example.test', model: 'test', timeoutMs: 5, fetchImpl, sleepImpl: async () => {} }), /body aborted/);
+  await assert.rejects(chat([], { apiBase: 'https://example.test', model: 'test', timeoutMs: 5, fetchImpl, sleepImpl: async () => {} }), /timed out/);
   assert.equal(calls, 3);
+});
+
+test('DeepSeek reasoning truncation retries with more room and preserves usage', async () => {
+  const requests = [];
+  const result = await chat([], { apiBase: 'https://example.test', model: 'deepseek-v4-pro', maxTokens: 500,
+    sleepImpl: async () => {}, fetchImpl: async (_url, init) => {
+      requests.push(JSON.parse(init.body));
+      return json({ choices: [{ finish_reason: requests.length === 1 ? 'length' : 'stop',
+        message: { content: requests.length === 1 ? '' : 'answer', reasoning_content: 'private reasoning' } }],
+        usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 } });
+    } });
+  assert.equal(result.content, 'answer');
+  assert.deepEqual(result.usage, { prompt_tokens: 20, completion_tokens: 40, total_tokens: 60 });
+  assert.deepEqual(requests.map(r => r.max_tokens), [32768, 65536]);
+  assert.equal(requests[0].reasoning_effort, 'low');
+  assert.deepEqual(requests[0].thinking, { type: 'enabled' });
+  assert.equal(requests[0].temperature, undefined);
+});
+
+test('empty and sanitized-empty answers retry, then fail with safe diagnostics and usage', async () => {
+  let calls = 0;
+  await assert.rejects(chat([], { apiBase: 'https://example.test', model: 'test', sleepImpl: async () => {},
+    fetchImpl: async (_url, init) => {
+      calls++;
+      const request = JSON.parse(init.body);
+      assert.equal(request.max_tokens, 4096);
+      assert.equal(request.thinking, undefined);
+      return json({ choices: [{ finish_reason: 'stop', message: { content: '<think>secret</think>', reasoning_content: 'secret' } }],
+        usage: { completion_tokens: 7 } });
+    } }), err => {
+      assert.match(err.message, /no text.*finish_reason=stop.*reasoning_chars=6/);
+      assert.ok(!err.message.includes('secret'));
+      assert.equal(err.usage.completion_tokens, 21);
+      return true;
+    });
+  assert.equal(calls, 3);
+});
+
+test('DeepSeek truncation retry is capped and diagnoses length before empty content', async () => {
+  let calls = 0;
+  await assert.rejects(chat([], { apiBase: 'https://example.test', model: 'deepseek-v4-flash', sleepImpl: async () => {},
+    fetchImpl: async () => { calls++; return json({ choices: [{ finish_reason: 'length', message: { content: '' } }] }); }
+  }), /incomplete.*finish_reason=length.*max_tokens=65536/);
+  assert.equal(calls, 2);
+});
+
+test('empty answer retry can recover and respects the deadline', async () => {
+  let calls = 0;
+  const fetchImpl = async () => json({ choices: [{ finish_reason: 'stop', message: { content: ++calls === 1 ? '' : 'answer' } }] });
+  assert.equal((await chat([], { apiBase: 'https://example.test', model: 'test', fetchImpl, sleepImpl: async () => {} })).content, 'answer');
+  calls = 0;
+  await assert.rejects(chat([], { apiBase: 'https://example.test', model: 'test', fetchImpl, deadline: Date.now() + 500 }), /budget/);
+  assert.equal(calls, 1);
 });

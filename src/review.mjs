@@ -33,7 +33,13 @@ export async function reviewPullRequest(event, owner, repo, config, { gh = githu
       metrics.completionTokens += result.usage?.completion_tokens || 0;
       metrics.totalTokens += result.usage?.total_tokens || 0;
       return result;
-    } catch (err) { metrics.failedRequests++; throw err; }
+    } catch (err) {
+      metrics.failedRequests++;
+      metrics.promptTokens += err.usage?.prompt_tokens || 0;
+      metrics.completionTokens += err.usage?.completion_tokens || 0;
+      metrics.totalTokens += err.usage?.total_tokens || 0;
+      throw err;
+    }
   };
   const sameSnapshot = current => current?.state === 'open' && current.head.sha === headSha && current.base.sha === baseSha;
   if (!sameSnapshot(await gh.getPR(owner, repo, number))) return { status: 'stale' };
