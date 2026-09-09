@@ -326,11 +326,11 @@ export function helpText(triggerWord) {
 | \`${triggerWord} fix\` | Tạo fix suggestion (reply vào review comment) |
 | \`${triggerWord} pause\` | Tạm dừng auto review cho PR này |
 | \`${triggerWord} resume\` | Bật lại auto review |
-| \`${triggerWord} resolve\` | Resolve tất cả comments cũ |
+| \`${triggerWord} resolve\` | Chưa hỗ trợ; resolve threads trực tiếp trên GitHub |
 | \`${triggerWord} help\` | Hiện bảng này |
 
 **Tips:**
 - Reply trực tiếp vào review comment để hỏi chi tiết
 - Reply \`${triggerWord} fix\` vào finding để bot tạo suggestion fix
-- Nếu review sai, reply sửa → bot sẽ hỏi có muốn lưu làm learning không`;
+- Nếu review sai, reply sửa → bot có thể đề xuất rule để thêm thủ công vào review-learnings.json`;
 }

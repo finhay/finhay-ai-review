@@ -11,7 +11,9 @@ export async function loadLearnings(gh, owner, repo, ref) {
   const content = await gh.getFileContent(owner, repo, LEARNINGS_PATH, ref);
   if (!content) return [];
   try {
-    return JSON.parse(content);
+    const entries = JSON.parse(content);
+    if (!Array.isArray(entries)) throw new Error('Learnings must be an array');
+    return entries.filter(l => l && typeof l.rule === 'string' && (!l.context || typeof l.context === 'string'));
   } catch {
     console.log('Failed to parse review-learnings.json');
     return [];
@@ -41,13 +43,13 @@ export function createLearning(rule, context, addedBy) {
 }
 
 /**
- * Generate a suggestion message asking if the user wants to save a learning
+ * Generate a suggestion for a maintainer to add a learning through a PR
  */
 export function learningConfirmationMessage(rule, context) {
-  return `💡 Em nhận thấy đây có thể là team preference. Lưu lại để áp dụng cho các review sau?
+  return `💡 Em nhận thấy đây có thể là team preference. Bạn có thể thêm rule này vào \`.github/review-learnings.json\` qua PR để áp dụng cho các review sau.
 
 > **Rule:** ${rule}
 > **Scope:** \`${context}\`
 
-Reply \`yes\` để em tạo PR thêm learning này, hoặc \`no\` để bỏ qua.`;
+Bot chỉ đề xuất rule; chưa tự lưu hoặc tạo PR.`;
 }

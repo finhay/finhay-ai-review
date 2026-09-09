@@ -1,0 +1,154 @@
+[
+  {
+    "id": "login-throws-instead-of-null",
+    "sourcePR": "https://github.com/finhay-pro/vnsc-account-service/pull/1188#pullrequestreview-4433351994",
+    "reviewedSha": "50dee11b65763d6b106989cdaace407ba162d225",
+    "expectedVerdict": "drop",
+    "finding": {
+      "file": "controller.ts",
+      "line": 2,
+      "severity": "🟠",
+      "severityLabel": "Major",
+      "title": "Missing null guard",
+      "body": "login() returns null for incorrect credentials; reading account.id then crashes."
+    },
+    "sources": {
+      "controller.ts": "import { login } from './service';\nconst account = await login(input);\nreturn account.id;",
+      "service.ts": "export async function login(input) {\n  if (!valid(input)) throw new UnauthorizedError();\n  return { id: 1 };\n}"
+    },
+    "expectedOffline": {
+      "deterministic": "requires-model-verification",
+      "removedSuggestion": false
+    }
+  },
+  {
+    "id": "suggestion-already-present",
+    "sourcePR": "https://github.com/finhay-pro/vnsc-account-service/pull/1198#pullrequestreview-4605692912",
+    "reviewedSha": "c04d02a867e68d7159ebd7d734087cd93aad0309",
+    "expectedVerdict": "drop",
+    "finding": {
+      "file": "image.ts",
+      "line": 2,
+      "severity": "🟡",
+      "severityLabel": "Minor",
+      "title": "Wrap the image URL",
+      "body": "The fallback needs signing.\n```suggestion\nreturn storage.sign(record.url);\n```"
+    },
+    "sources": {
+      "image.ts": "if (record.url) {\nreturn storage.sign(record.url);\n}"
+    },
+    "expectedOffline": {
+      "deterministic": "requires-model-verification",
+      "removedSuggestion": true
+    }
+  },
+  {
+    "id": "no-action-needed",
+    "sourcePR": "https://github.com/finhay-pro/vnsc-account-service/pull/1226#discussion_r3681824903",
+    "reviewedSha": "0fcaf08b108ec58d5226818aed4aae1e1c765568",
+    "expectedVerdict": "drop",
+    "finding": {
+      "file": "test.ts",
+      "line": 1,
+      "severity": "🟡",
+      "severityLabel": "Minor",
+      "title": "Note (không cần fix)",
+      "body": "This partial mock is appropriate for this test; no change is required."
+    },
+    "sources": {
+      "test.ts": "const mock = { code: 'test' };"
+    },
+    "expectedOffline": {
+      "deterministic": "dropped",
+      "removedSuggestion": false
+    }
+  },
+  {
+    "id": "import-order-is-not-major",
+    "sourcePR": "https://github.com/finhay-pro/vnsc-account-service/pull/1207#pullrequestreview-4650498699",
+    "reviewedSha": "2f326aff0c809cac86aa5653e044b2b1f7f6c484",
+    "expectedVerdict": "drop",
+    "finding": {
+      "file": "service.ts",
+      "line": 1,
+      "severity": "🟠",
+      "severityLabel": "Major",
+      "title": "Imports were reordered",
+      "body": "The imports were reordered alphabetically. No behavior changed. This should be a separate PR."
+    },
+    "sources": {
+      "service.ts": "import type { A } from './a';\nimport type { B } from './b';"
+    },
+    "expectedOffline": {
+      "deterministic": "requires-model-verification",
+      "removedSuggestion": false
+    }
+  },
+  {
+    "id": "validate-account-type",
+    "sourcePR": "https://github.com/finhay-pro/vnsc-account-service/pull/1188#discussion_r3360360350",
+    "reviewedSha": "50dee11b65763d6b106989cdaace407ba162d225",
+    "expectedVerdict": "keep",
+    "maxSeverity": "Minor",
+    "finding": {
+      "file": "controller.ts",
+      "line": 1,
+      "severity": "🟡",
+      "severityLabel": "Minor",
+      "title": "Reject unknown account types",
+      "body": "An account_type of 'typo' selects individual login instead of rejecting the unsupported account type. Validate the input enum first."
+    },
+    "sources": {
+      "controller.ts": "const enterprise = req.body.account_type === 'enterprise';\nreturn enterprise ? enterpriseLogin() : individualLogin();"
+    },
+    "expectedOffline": {
+      "deterministic": "requires-model-verification",
+      "removedSuggestion": false
+    }
+  },
+  {
+    "id": "response-envelope-mismatch",
+    "sourcePR": "https://github.com/finhay-pro/vnsc-account-service/pull/1188#pullrequestreview-4433351994",
+    "reviewedSha": "50dee11b65763d6b106989cdaace407ba162d225",
+    "expectedVerdict": "keep",
+    "maxSeverity": "Minor",
+    "finding": {
+      "file": "controller.ts",
+      "line": 2,
+      "severity": "🟡",
+      "severityLabel": "Minor",
+      "title": "Use one response envelope",
+      "body": "Success returns payload under result while validation errors use data. Use the same envelope for this endpoint; a specific consumer failure is not established."
+    },
+    "sources": {
+      "controller.ts": "if (!input) return { data: { error: 'missing input' } };\nreturn { result: { id: 1 } };"
+    },
+    "expectedOffline": {
+      "deterministic": "requires-model-verification",
+      "removedSuggestion": false
+    }
+  },
+  {
+    "id": "positive-control-null-dereference",
+    "sourcePR": null,
+    "reviewedSha": null,
+    "expectedVerdict": "keep",
+    "maxSeverity": "Major",
+    "finding": {
+      "file": "controller.ts",
+      "line": 2,
+      "severity": "🟠",
+      "severityLabel": "Major",
+      "title": "Null result is dereferenced",
+      "body": "When input is empty, login explicitly returns null. Reading account.id then throws before a response can be returned."
+    },
+    "sources": {
+      "controller.ts": "const account = login(input);\nreturn account.id;",
+      "service.ts": "function login(input) {\n  if (!input) return null;\n  return { id: 1 };\n}"
+    },
+    "expectedOffline": {
+      "deterministic": "requires-model-verification",
+      "removedSuggestion": false
+    }
+  }
+]

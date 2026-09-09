@@ -4,56 +4,49 @@ const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 1000;
 const REQUEST_TIMEOUT_MS = 120_000; // 2 minutes per request
 
-export async function chat(messages, { apiBase, apiKey, model, temperature = 0.1, maxTokens = 4096 }) {
+export async function chat(messages, { apiBase, apiKey, model, temperature = 0.1,
+  maxTokens = 4096, deadline = Infinity, timeoutMs = REQUEST_TIMEOUT_MS,
+  fetchImpl = fetch, sleepImpl = sleep }) {
   const url = `${apiBase.replace(/\/$/, '')}/chat/completions`;
-
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error('Review budget exhausted');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.min(timeoutMs, remaining));
+    let error;
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-      let res;
-      try {
-        res = await fetch(url, {
-          method: 'POST',
-          signal: controller.signal,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            messages,
-            temperature,
-            max_tokens: maxTokens,
-          }),
-        });
-      } finally {
-        clearTimeout(timer);
-      }
-
-      if (res.status === 429 || res.status >= 500) {
-        const wait = RETRY_BASE_MS * Math.pow(2, attempt);
-        console.log(`LLM API ${res.status}, retry in ${wait}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
-        await sleep(wait);
-        continue;
-      }
-
+      const res = await fetchImpl(url, {
+        method: 'POST', signal: controller.signal,
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens }),
+      });
+      // Keep the timeout active until the response body has finished arriving.
+      const body = await res.text();
       if (!res.ok) {
-        const body = await res.text();
-        throw new Error(`LLM API error ${res.status}: ${body.slice(0, 500)}`);
+        error = new Error(`LLM API error ${res.status}`);
+        error.retryable = res.status === 429 || res.status >= 500;
+        const retryAfter = Number(res.headers.get('retry-after'));
+        if (retryAfter > 0) error.retryAfterMs = Math.min(retryAfter * 1000, 30000);
+        throw error;
       }
-
-      const data = await res.json();
-      return {
-        content: sanitizeModelOutput(data.choices?.[0]?.message?.content || ''),
-        usage: data.usage || {},
-      };
+      const data = JSON.parse(body);
+      const choice = data.choices?.[0];
+      if (!choice || typeof choice.message?.content !== 'string' || !choice.message.content.trim()) {
+        throw Object.assign(new Error('LLM returned no text'), { retryable: false });
+      }
+      if (choice.finish_reason !== 'stop') {
+        throw Object.assign(new Error(`LLM response incomplete (${choice.finish_reason || 'missing finish_reason'})`), { retryable: false });
+      }
+      return { content: sanitizeModelOutput(choice.message.content), usage: data.usage || {} };
     } catch (err) {
-      if (attempt === MAX_RETRIES - 1) throw err;
-      const wait = RETRY_BASE_MS * Math.pow(2, attempt);
-      console.log(`LLM request failed: ${err.message}, retry in ${wait}ms`);
-      await sleep(wait);
+      error = err;
+      if (err.retryable === false || attempt === MAX_RETRIES - 1) throw err;
+    } finally {
+      clearTimeout(timer);
     }
+    const wait = error.retryAfterMs || RETRY_BASE_MS * 2 ** attempt;
+    if (Date.now() + wait >= deadline) throw new Error('Review budget exhausted');
+    await sleepImpl(wait);
   }
 }
 
@@ -63,7 +56,6 @@ export async function chat(messages, { apiBase, apiKey, model, temperature = 0.1
  */
 export function chunkDiffByFile(diffText) {
   const files = [];
-  const filePattern = /^diff --git a\/(.*?) b\/(.*?)$/gm;
   const segments = diffText.split(/^diff --git /m).filter(Boolean);
 
   for (const segment of segments) {
@@ -92,12 +84,12 @@ export function packChunks(fileChunks, maxChars = 40000) {
   let current = null;
 
   for (const chunk of fileChunks) {
-    if (current && current.chars + chunk.patch.length <= maxChars) {
+    if (current && current.chars + chunk.patch.length + 1 <= maxChars) {
       current.filenames.push(chunk.filename);
       current.patches.push(chunk.patch);
-      current.chars += chunk.patch.length;
+      current.chars += chunk.patch.length + 1;
     } else {
-      // A file larger than maxChars gets its own group and is truncated by the caller.
+      // A file larger than maxChars gets its own group and must be split before packing by the review planner.
       current = {
         filenames: [chunk.filename],
         patches: [chunk.patch],
