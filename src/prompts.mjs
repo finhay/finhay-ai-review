@@ -86,7 +86,7 @@ Spend your attention here rather than on generic hardening. These are provable f
 ## Do NOT
 - Flag issues that a linter, formatter, or type checker would already catch
 - Suggest adding error handling where the framework or caller already guarantees safety
-- Hallucinate line numbers — if you cannot determine the exact line, quote the code instead
+- Hallucinate line numbers — findings must use an exact repository-relative file path and a RIGHT-side line visible in this batch, using \`@@\` hunk coordinates. If you cannot determine the exact location, put the candidate and a code quote under \`### Cần verify\` instead of Findings
 - Suggest changes that would break existing tests or APIs without mentioning the impact
 - Repeat the same finding for multiple occurrences — mention it once and note "same pattern in X other places"
 - Add generic advice ("consider adding tests", "add logging") unless there is a specific risk

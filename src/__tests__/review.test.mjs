@@ -175,3 +175,40 @@ test('action fails only after saving partial coverage and accounts for failed re
   const result = await handlePullRequest(s.event, 'o', 'r', config, { gh: s.gh, chat: async () => clean });
   assert.equal(result.status, 'complete');
 });
+
+test('unanchored candidates remain visible as uncertain without failing the batch or posting inline', async () => {
+  for (const header of [
+    '🟠 **Major — Missing guard** — `a.ts:999`',
+    '🟠 **Major — Missing guard** — `other.ts:1`',
+    '🟠 **Major — Missing guard**',
+  ]) {
+    const s = setup();
+    const { handlePullRequest } = await import('../index.mjs');
+    const result = await handlePullRequest(s.event, 'o', 'r', config, { gh: s.gh, chat: async () => ({
+      content: `### Findings\n${header}\n\nAn empty input is dereferenced and crashes before reaching the guard.`,
+    }) });
+    assert.equal(result.status, 'complete');
+    assert.equal(result.metrics.uncertain, 1);
+    assert.equal(result.findings.length, 0);
+    assert.equal(s.posted[0][5].length, 0);
+    assert.match(s.posted[0][3], /unverified items below require human review/);
+    assert.match(s.posted[0][3], /Unverified candidate — no valid file\/line anchor/);
+    assert.match(s.posted[0][3], /An empty input is dereferenced/);
+  }
+});
+
+test('unanchored candidate does not discard a verified finding in the same batch', async () => {
+  const s = setup();
+  s.gh.getFileContent = async () => 'const value = input.value;';
+  let calls = 0;
+  const result = await reviewPullRequest(s.event, 'o', 'r', config, { gh: s.gh, chat: async () => {
+    if (++calls === 1) return { content: '### Findings\n🟠 **Major — Unknown location** — `a.ts:999`\n\nAn empty input causes a crash before the guard.\n\n🟠 **Major — Missing guard** — `a.ts:1`\n\nAn empty input is dereferenced and crashes before reaching the guard.' };
+    return { content: JSON.stringify({ verdict: 'keep', severity: 'Major', reason: 'Null input is dereferenced.', evidence: [{ path: 'a.ts', line: 1, quote: 'const value = input.value;' }] }) };
+  } });
+  assert.equal(result.status, 'complete');
+  assert.equal(result.metrics.uncertain, 1);
+  assert.equal(result.findings.length, 1);
+  assert.equal(s.posted[0][5].length, 1);
+  assert.equal(s.posted[0][5][0].line, 1);
+  assert.equal(calls, 2);
+});

@@ -121,7 +121,13 @@ export async function reviewPullRequest(event, owner, repo, config, { gh = githu
         metrics.candidates += candidates.length;
         for (const candidate of candidates) {
           if (!cleanFinding(candidate, '', config.includeNitpicks)) { metrics.dropped++; continue; }
-          if (!candidate.file || !candidate.line || !group.filenames.includes(candidate.file) || !batchLines.get(candidate.file)?.has(candidate.line)) throw new Error('Finding has no valid file/line anchor');
+          if (!candidate.file || !candidate.line || !group.filenames.includes(candidate.file) || !batchLines.get(candidate.file)?.has(candidate.line)) {
+            // A model's location mistake is uncertainty about this candidate,
+            // not a transport failure that should discard the entire batch.
+            verify.push(`Unverified candidate — no valid file/line anchor in this batch. Confirm the location and claim before acting:\n\n${candidate.raw}`);
+            metrics.uncertain++;
+            continue;
+          }
           const source = await readFile(candidate.file);
           let finding = cleanFinding(candidate, source || '', config.includeNitpicks);
           if (config.verifyFindings !== false) {
@@ -168,7 +174,7 @@ export async function reviewPullRequest(event, owner, repo, config, { gh = githu
   const notice = `Review coverage: **${completed.length}/${groups.length} batches** (${complete ? 'complete' : 'partial'}), commit \`${headSha.slice(0, 7)}\`.` +
     (complete ? '' : `\n\n⚠️ Unfinished batches will be retried by \`${config.triggerWord} review\`. A new push also revisits code not covered by the last complete review.\n${failures.slice(0, 20).map(f => `- ${f.id.slice(0, 8)}: ${f.reason}`).join('\n')}${failures.length > 20 ? `\n- … ${failures.length - 20} more failed batches` : ''}`);
   const render = bodyFindings => [notice, summaries.length ? `### Tóm tắt\n${summaries.join('\n')}` : '',
-    `### Findings\n${bodyFindings || (findings.length ? `${findings.length} finding(s) posted inline.` : complete ? (previous?.completed?.length ? 'No additional actionable findings in this run; see earlier reviews for previously completed batches.' : 'No actionable findings in the reviewed changes.') : 'No new actionable findings in this run; review is incomplete.')}`,
+    `### Findings\n${bodyFindings || (findings.length ? `${findings.length} finding(s) posted inline.` : complete ? (verify.length ? 'No confirmed actionable findings in this run; unverified items below require human review.' : previous?.completed?.length ? 'No additional actionable findings in this run; see earlier reviews for previously completed batches.' : 'No actionable findings in the reviewed changes.') : 'No new actionable findings in this run; review is incomplete.')}`,
     verify.length ? `### Cần verify\n${verify.join('\n')}` : '', positives.length ? `### ✅ Điểm tốt\n${positives.join('\n')}` : ''].filter(Boolean).join('\n\n');
   const coverage = { sha: headSha, baseSha, diffBase, policy, complete, completed };
   const map = parseDiffMap(fullDiff);
