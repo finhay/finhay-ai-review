@@ -112,3 +112,22 @@ test('empty answer retry can recover and respects the deadline', async () => {
   await assert.rejects(chat([], { apiBase: 'https://example.test', model: 'test', fetchImpl, deadline: Date.now() + 500 }), /budget/);
   assert.equal(calls, 1);
 });
+
+test('OpenAI reasoning models get max_completion_tokens, no temperature, and a readable 400', async () => {
+  const requests = [];
+  const result = await chat([], { apiBase: 'https://example.test', model: 'gpt-5.6-terra', maxTokens: 500,
+    sleepImpl: async () => {},
+    fetchImpl: async (_url, init) => {
+      requests.push(JSON.parse(init.body));
+      return json({ choices: [{ finish_reason: 'stop', message: { content: 'answer' } }] });
+    } });
+  assert.equal(result.content, 'answer');
+  assert.equal(requests[0].max_completion_tokens, 32768);
+  assert.equal(requests[0].max_tokens, undefined);
+  assert.equal(requests[0].temperature, undefined);
+  assert.equal(requests[0].thinking, undefined);
+
+  await assert.rejects(chat([], { apiBase: 'https://example.test', model: 'gpt-5.6-terra', sleepImpl: async () => {},
+    fetchImpl: async () => json({ error: { message: "Unsupported parameter: 'max_tokens' is not supported with this model." } }, 400) }),
+    /LLM API error 400: Unsupported parameter: 'max_tokens'/);
+});

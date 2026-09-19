@@ -11,8 +11,13 @@ export async function chat(messages, { apiBase, apiKey, model, temperature = 0.1
   // V4 defaults to high-effort thinking. Reserve room for reasoning even for
   // short verifier/summary answers, and keep all attempts inside the run budget.
   const thinking = /^deepseek-v4-(pro|flash)(?:-|$)/i.test(model);
-  let tokenLimit = thinking ? Math.max(maxTokens, 32768) : maxTokens;
-  const requestTimeout = timeoutMs ?? (thinking ? 240_000 : REQUEST_TIMEOUT_MS);
+  // OpenAI reasoning models (gpt-5.x, o-series) reject `max_tokens` and any
+  // non-default `temperature` with a 400. They also bill reasoning against the
+  // output cap, so a 4096 cap gets eaten before any text is produced.
+  const openaiReasoning = /^(?:gpt-5|o[1-9])(?:[.\-]|$)/i.test(model);
+  const reasoning = thinking || openaiReasoning;
+  let tokenLimit = reasoning ? Math.max(maxTokens, 32768) : maxTokens;
+  const requestTimeout = timeoutMs ?? (reasoning ? 240_000 : REQUEST_TIMEOUT_MS);
   const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     const remaining = deadline - Date.now();
@@ -24,12 +29,14 @@ export async function chat(messages, { apiBase, apiKey, model, temperature = 0.1
       const res = await fetchImpl(url, {
         method: 'POST', signal: controller.signal,
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ model, messages, max_tokens: tokenLimit,
-          ...(thinking ? { thinking: { type: 'enabled' }, reasoning_effort: 'low' } : { temperature }) }),
+        body: JSON.stringify({ model, messages,
+          ...(openaiReasoning ? { max_completion_tokens: tokenLimit } : { max_tokens: tokenLimit }),
+          ...(thinking ? { thinking: { type: 'enabled' }, reasoning_effort: 'low' } : {}),
+          ...(reasoning ? {} : { temperature }) }),
       });
       const body = await res.text();
       if (!res.ok) {
-        error = new Error(`LLM API error ${res.status}`);
+        error = new Error(`LLM API error ${res.status}${describeApiError(body)}`);
         error.retryable = res.status === 429 || res.status >= 500;
         const retryAfter = Number(res.headers.get('retry-after'));
         if (retryAfter > 0) error.retryAfterMs = Math.min(retryAfter * 1000, 30000);
@@ -47,7 +54,7 @@ export async function chat(messages, { apiBase, apiKey, model, temperature = 0.1
       const reasoningChars = typeof choice?.message?.reasoning_content === 'string' ? choice.message.reasoning_content.length : 0;
       const diagnostic = `finish_reason=${reason}, reasoning_chars=${reasoningChars}, max_tokens=${tokenLimit}`;
       if (reason !== 'stop') {
-        const retryable = (reason === 'length' && thinking && tokenLimit < 65536) || reason === 'insufficient_system_resource';
+        const retryable = (reason === 'length' && reasoning && tokenLimit < 65536) || reason === 'insufficient_system_resource';
         if (reason === 'length' && retryable) tokenLimit = Math.min(tokenLimit * 2, 65536);
         throw Object.assign(new Error(`LLM response incomplete (${diagnostic})`), { retryable });
       }
@@ -67,6 +74,21 @@ export async function chat(messages, { apiBase, apiKey, model, temperature = 0.1
     if (Date.now() + wait >= deadline) throw Object.assign(new Error('Review budget exhausted'), { usage });
     await sleepImpl(wait);
   }
+}
+
+/**
+ * Surface why the provider rejected the request. Error envelopes carry the
+ * offending parameter, never prompt or response text, so this stays safe to
+ * log — truncated in case a provider deviates from that shape.
+ */
+function describeApiError(body) {
+  let message;
+  try {
+    const parsed = JSON.parse(body);
+    message = parsed?.error?.message ?? parsed?.message;
+  } catch {}
+  if (typeof message !== 'string' || !message.trim()) return '';
+  return `: ${message.trim().replace(/\s+/g, ' ').slice(0, 300)}`;
 }
 
 /**
