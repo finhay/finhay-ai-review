@@ -11,11 +11,11 @@ export async function chat(messages, { apiBase, apiKey, model, temperature = 0.1
   // V4 defaults to high-effort thinking. Reserve room for reasoning even for
   // short verifier/summary answers, and keep all attempts inside the run budget.
   const thinking = /^deepseek-v4-(pro|flash)(?:-|$)/i.test(model);
-  // OpenAI reasoning models (gpt-5.x, o-series) reject `max_tokens` and any
-  // non-default `temperature` with a 400. They also bill reasoning against the
-  // output cap, so a 4096 cap gets eaten before any text is produced.
-  const openaiReasoning = /^(?:gpt-5|o[1-9])(?:[.\-]|$)/i.test(model);
-  const reasoning = thinking || openaiReasoning;
+  // OpenAI reasoning models (gpt-5 and later, o-series) reject `max_tokens` and
+  // any non-default `temperature` with a 400. They also bill reasoning against
+  // the output cap, so a 4096 cap gets eaten before any text is produced.
+  let openaiReasoning = /^(?:gpt-(?:[5-9]|\d{2,})|o[1-9])(?:[.\-]|$)/i.test(model);
+  let reasoning = thinking || openaiReasoning;
   let tokenLimit = reasoning ? Math.max(maxTokens, 32768) : maxTokens;
   const requestTimeout = timeoutMs ?? (reasoning ? 240_000 : REQUEST_TIMEOUT_MS);
   const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
@@ -38,6 +38,14 @@ export async function chat(messages, { apiBase, apiKey, model, temperature = 0.1
       if (!res.ok) {
         error = new Error(`LLM API error ${res.status}${describeApiError(body)}`);
         error.retryable = res.status === 429 || res.status >= 500;
+        // A model the name check missed: switch to the reasoning parameter set
+        // the provider asked for instead of failing every batch.
+        if (res.status === 400 && !openaiReasoning
+          && /max_completion_tokens|unsupported (?:parameter|value).*'(?:max_tokens|temperature)'/i.test(error.message)) {
+          openaiReasoning = reasoning = true;
+          tokenLimit = Math.max(tokenLimit, 32768);
+          error.retryable = true;
+        }
         const retryAfter = Number(res.headers.get('retry-after'));
         if (retryAfter > 0) error.retryAfterMs = Math.min(retryAfter * 1000, 30000);
         throw error;

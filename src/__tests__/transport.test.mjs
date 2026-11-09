@@ -131,3 +131,34 @@ test('OpenAI reasoning models get max_completion_tokens, no temperature, and a r
     fetchImpl: async () => json({ error: { message: "Unsupported parameter: 'max_tokens' is not supported with this model." } }, 400) }),
     /LLM API error 400: Unsupported parameter: 'max_tokens'/);
 });
+
+test('later OpenAI generations are treated as reasoning models', async () => {
+  for (const model of ['gpt-6.1-sol', 'gpt-6', 'gpt-10-mini', 'o3']) {
+    const requests = [];
+    await chat([], { apiBase: 'https://example.test', model, sleepImpl: async () => {},
+      fetchImpl: async (_url, init) => {
+        requests.push(JSON.parse(init.body));
+        return json({ choices: [{ finish_reason: 'stop', message: { content: 'answer' } }] });
+      } });
+    assert.equal(requests[0].max_completion_tokens, 32768, model);
+    assert.equal(requests[0].max_tokens, undefined, model);
+    assert.equal(requests[0].temperature, undefined, model);
+  }
+});
+
+test('unrecognised model switches to max_completion_tokens after a parameter 400', async () => {
+  const requests = [];
+  const result = await chat([], { apiBase: 'https://example.test', model: 'acme-reasoner', sleepImpl: async () => {},
+    fetchImpl: async (_url, init) => {
+      const request = JSON.parse(init.body);
+      requests.push(request);
+      if ('max_tokens' in request) {
+        return json({ error: { message: "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead." } }, 400);
+      }
+      return json({ choices: [{ finish_reason: 'stop', message: { content: 'answer' } }] });
+    } });
+  assert.equal(result.content, 'answer');
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].max_completion_tokens, 32768);
+  assert.equal(requests[1].temperature, undefined);
+});
